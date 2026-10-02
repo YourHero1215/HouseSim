@@ -71,6 +71,11 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [placementError, setPlacementError] = useState<string | null>(null);
+  const [crashNotification, setCrashNotification] = useState<string | null>(null);
+
+  const isExplodingRef = useRef<boolean>(false);
+  const explosionTimerRef = useRef<number>(0);
+  const cameraShakeRef = useRef<number>(0);
 
   // Latest props reference for 60fps animation loop
   const stateRef = useRef({
@@ -138,8 +143,8 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
   const humanPosRef = useRef<THREE.Vector3>(new THREE.Vector3(-10.0, 0, 7.5));
   const humanRotRef = useRef<number>(0);
 
-  // Camera Orbit & Zoom State
-  const cameraYawRef = useRef<number>(0.15);
+  // Camera Orbit & Zoom State (0.0 aligns directly with North-South avenues and house hallways)
+  const cameraYawRef = useRef<number>(0.0);
   const cameraPitchRef = useRef<number>(0.65);
   const cameraDistRef = useRef<number>(11.0);
   const isInsideBuildingRef = useRef<boolean>(false);
@@ -655,20 +660,43 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
     const pSkin = new THREE.MeshStandardMaterial({ color: 0xfdba74, roughness: 0.5 });
     const pJacket = new THREE.MeshStandardMaterial({ color: 0x0284c7, roughness: 0.6 });
     const pPants = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.8 });
+    const pDark = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.5 });
+    const pShoes = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.7 });
 
     const pHead = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.3, 0.28), pSkin);
     pHead.position.y = 1.55;
     playerGrp.add(pHead);
 
+    // Front Face Visor so facing direction (+Z) is unmistakably clear
+    const pVisor = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.08, 0.06), pDark);
+    pVisor.position.set(0, 1.57, 0.145);
+    playerGrp.add(pVisor);
+
+    // Baseball Cap with Front-Facing Brim (+Z)
+    const pCap = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.1, 0.3), pJacket);
+    pCap.position.set(0, 1.71, 0);
+    const pBrim = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.03, 0.14), pJacket);
+    pBrim.position.set(0, 1.68, 0.2);
+    playerGrp.add(pCap, pBrim);
+
+    // Torso with front zipper
     const pTorso = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.58, 0.24), pJacket);
     pTorso.position.y = 1.06;
     playerGrp.add(pTorso);
+
+    const pZipper = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.52, 0.02), pDark);
+    pZipper.position.set(0, 1.06, 0.125);
+    playerGrp.add(pZipper);
 
     const pLegL = new THREE.Group();
     pLegL.position.set(0.11, 0.74, 0);
     const pLegMeshL = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.74, 0.15), pPants);
     pLegMeshL.position.y = -0.37;
     pLegL.add(pLegMeshL);
+    // Shoes pointing forward (+Z)
+    const pShoeL = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.12, 0.22), pShoes);
+    pShoeL.position.set(0, -0.7, 0.04);
+    pLegL.add(pShoeL);
     playerGrp.add(pLegL);
 
     const pLegR = new THREE.Group();
@@ -676,6 +704,9 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
     const pLegMeshR = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.74, 0.15), pPants);
     pLegMeshR.position.y = -0.37;
     pLegR.add(pLegMeshR);
+    const pShoeR = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.12, 0.22), pShoes);
+    pShoeR.position.set(0, -0.7, 0.04);
+    pLegR.add(pShoeR);
     playerGrp.add(pLegR);
 
     // =========================================================================
@@ -711,6 +742,128 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
     ghostGroup.visible = false;
     scene.add(ghostGroup);
     ghostMeshRef.current = ghostGroup;
+
+    // =========================================================================
+    // LOW-POLY EXPLOSION SYSTEM (Debris Shards, Expanding Ring & Flash Core)
+    // =========================================================================
+    const explosionGroup = new THREE.Group();
+    scene.add(explosionGroup);
+
+    const explosionLight = new THREE.PointLight(0xff6600, 0, 18);
+    scene.add(explosionLight);
+
+    interface ExplosionParticle {
+      mesh: THREE.Mesh;
+      vel: THREE.Vector3;
+      rotVel: THREE.Vector3;
+      life: number;
+      maxLife: number;
+      initialScale: number;
+    }
+    const explosionParticles: ExplosionParticle[] = [];
+
+    const triggerHouseExplosion = (crashX: number, crashZ: number) => {
+      if (isExplodingRef.current) return;
+      isExplodingRef.current = true;
+      explosionTimerRef.current = 1.35;
+      cameraShakeRef.current = 0.85;
+      soundFX.playLowPolyExplosion();
+      setCrashNotification('💥 HOUSE CRASH! Respawning at home...');
+
+      explosionLight.position.set(crashX, 1.8, crashZ);
+      explosionLight.intensity = 20;
+
+      while (explosionGroup.children.length > 0) {
+        explosionGroup.remove(explosionGroup.children[0]);
+      }
+      explosionParticles.length = 0;
+
+      // 1. Central Low-Poly Fire Core (Expanding Icosahedron)
+      const coreMat = new THREE.MeshBasicMaterial({ color: 0xfff000 });
+      const coreMesh = new THREE.Mesh(new THREE.IcosahedronGeometry(0.9, 0), coreMat);
+      coreMesh.position.set(crashX, 1.2, crashZ);
+      explosionGroup.add(coreMesh);
+      explosionParticles.push({
+        mesh: coreMesh,
+        vel: new THREE.Vector3(0, 1.2, 0),
+        rotVel: new THREE.Vector3(6, 8, 5),
+        life: 0,
+        maxLife: 0.6,
+        initialScale: 0.9,
+      });
+
+      // 2. Low-Poly Expanding Ground Shockwave Ring
+      const shockMat = new THREE.MeshBasicMaterial({
+        color: 0xffaa00,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.85,
+      });
+      const shockRing = new THREE.Mesh(new THREE.RingGeometry(0.3, 0.7, 12), shockMat);
+      shockRing.rotation.x = -Math.PI / 2;
+      shockRing.position.set(crashX, 0.08, crashZ);
+      explosionGroup.add(shockRing);
+      explosionParticles.push({
+        mesh: shockRing,
+        vel: new THREE.Vector3(0, 0, 0),
+        rotVel: new THREE.Vector3(0, 0, 0),
+        life: 0,
+        maxLife: 0.75,
+        initialScale: 0.5,
+      });
+
+      // 3. Faceted Low-Poly Shards (Tetrahedrons, Icosahedrons, Cubes)
+      const shardColors = [0xff4500, 0xffaa00, 0xffeb3b, 0xffffff, 0x334155, 0x0284c7];
+      for (let i = 0; i < 42; i++) {
+        const col = shardColors[i % shardColors.length];
+        const pMat = new THREE.MeshStandardMaterial({
+          color: col,
+          roughness: 0.3,
+          metalness: 0.1,
+          flatShading: true,
+        });
+
+        let geo: THREE.BufferGeometry;
+        const type = i % 3;
+        if (type === 0) {
+          geo = new THREE.TetrahedronGeometry(0.24 + Math.random() * 0.18, 0);
+        } else if (type === 1) {
+          geo = new THREE.IcosahedronGeometry(0.2 + Math.random() * 0.14, 0);
+        } else {
+          geo = new THREE.BoxGeometry(0.22, 0.22, 0.22);
+        }
+
+        const pMesh = new THREE.Mesh(geo, pMat);
+        pMesh.position.set(
+          crashX + (Math.random() - 0.5) * 0.6,
+          0.9 + Math.random() * 0.8,
+          crashZ + (Math.random() - 0.5) * 0.6
+        );
+        pMesh.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, 0);
+        explosionGroup.add(pMesh);
+
+        const angle = Math.random() * Math.PI * 2;
+        const spd = 4.5 + Math.random() * 9.0;
+        const up = 4.0 + Math.random() * 8.0;
+
+        explosionParticles.push({
+          mesh: pMesh,
+          vel: new THREE.Vector3(Math.cos(angle) * spd, up, Math.sin(angle) * spd),
+          rotVel: new THREE.Vector3(
+            (Math.random() - 0.5) * 14,
+            (Math.random() - 0.5) * 14,
+            (Math.random() - 0.5) * 14
+          ),
+          life: 0,
+          maxLife: 0.9 + Math.random() * 0.45,
+          initialScale: 1.0,
+        });
+      }
+
+      if (activeCarGroupRef.current) {
+        activeCarGroupRef.current.visible = false;
+      }
+    };
 
     // =========================================================================
     // 7. INPUT HANDLING & RIGHT-CLICK DRAG / SCROLL ZOOM CAMERA POV
@@ -813,7 +966,7 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
         const dx = e.clientX - pointerPos.x;
         const dy = e.clientY - pointerPos.y;
         cameraYawRef.current -= dx * 0.0065;
-        cameraPitchRef.current = Math.max(0.12, Math.min(1.42, cameraPitchRef.current + dy * 0.0055));
+        cameraPitchRef.current = Math.max(0.12, Math.min(1.42, cameraPitchRef.current - dy * 0.0055));
         pointerPos = { x: e.clientX, y: e.clientY };
         return;
       }
@@ -952,6 +1105,86 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
       if (cur.isDrivingCar) {
         playerGrp.visible = false;
         const carPhys = carPhysicsRef.current;
+
+        // --- ACTIVE EXPLOSION ANIMATION & RESPAWN SEQUENCE ---
+        if (isExplodingRef.current) {
+          explosionTimerRef.current -= dt;
+          explosionLight.intensity = Math.max(0, explosionLight.intensity - dt * 16);
+
+          for (let i = explosionParticles.length - 1; i >= 0; i--) {
+            const p = explosionParticles[i];
+            p.life += dt;
+            const progress = p.life / p.maxLife;
+
+            if (progress >= 1) {
+              explosionGroup.remove(p.mesh);
+              explosionParticles.splice(i, 1);
+              continue;
+            }
+
+            p.vel.y -= 16.0 * dt; // Gravity
+            p.mesh.position.addScaledVector(p.vel, dt);
+
+            // Ground bounce
+            if (p.mesh.position.y < 0.1) {
+              p.mesh.position.y = 0.1;
+              p.vel.y = -p.vel.y * 0.35;
+              p.vel.x *= 0.65;
+              p.vel.z *= 0.65;
+            }
+
+            p.mesh.rotation.x += p.rotVel.x * dt;
+            p.mesh.rotation.y += p.rotVel.y * dt;
+            p.mesh.rotation.z += p.rotVel.z * dt;
+
+            const s = Math.max(0.01, p.initialScale * (1 - progress));
+            p.mesh.scale.setScalar(s);
+          }
+
+          // Camera Shake
+          if (cameraShakeRef.current > 0) {
+            cameraShakeRef.current = Math.max(0, cameraShakeRef.current - dt * 1.6);
+            camera.position.x += (Math.random() - 0.5) * cameraShakeRef.current * 0.5;
+            camera.position.y += (Math.random() - 0.5) * cameraShakeRef.current * 0.5;
+          }
+
+          // When explosion completes: RESPAWN AT HOUSE!
+          if (explosionTimerRef.current <= 0) {
+            isExplodingRef.current = false;
+            setCrashNotification(null);
+
+            while (explosionGroup.children.length > 0) {
+              explosionGroup.remove(explosionGroup.children[0]);
+            }
+            explosionParticles.length = 0;
+            explosionLight.intensity = 0;
+
+            // Reset Car to House Driveway
+            carPhys.x = -4.5;
+            carPhys.z = 14.0;
+            carPhys.rotationY = 0;
+            carPhys.speed = 0;
+            carPhys.steering = 0;
+
+            if (activeCarGroupRef.current) {
+              activeCarGroupRef.current.position.set(-4.5, 0, 14.0);
+              activeCarGroupRef.current.rotation.y = 0;
+              activeCarGroupRef.current.visible = true;
+            }
+
+            // Reset Player to House Driveway
+            humanPosRef.current.set(-4.5, 0, 14.0);
+            playerGrp.position.set(-4.5, 0, 14.0);
+
+            cameraYawRef.current = 0.0;
+            soundFX.playCarEngineStart();
+          }
+
+          cur.onSpeedUpdate(0);
+          renderer.render(scene, camera);
+          return;
+        }
+
         const activeCar = cur.ownedCars.find((c) => c.id === cur.activeCarId) || cur.ownedCars[0] || {
           maxSpeed: 25,
           acceleration: 1.5,
@@ -979,17 +1212,42 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
         }
 
         if (Math.abs(carPhys.speed) > 0.1) {
-          carPhys.rotationY += carPhys.steering * (carPhys.speed / maxSpd) * 2.5 * dt;
+          carPhys.rotationY -= carPhys.steering * (carPhys.speed / maxSpd) * 2.5 * dt;
         }
 
         // Test Candidate Car Position against Building/Wall Colliders
         const nextCarX = carPhys.x + Math.sin(carPhys.rotationY) * carPhys.speed * dt;
         const nextCarZ = carPhys.z + Math.cos(carPhys.rotationY) * carPhys.speed * dt;
 
-        // Car collision radius ~1.2m
-        if (checkCollision(nextCarX, nextCarZ, 1.2)) {
-          // Bump and bounce with friction
-          carPhys.speed = -carPhys.speed * 0.35;
+        // Check if car crashed into house wall or city building
+        const hitCol = collidersRef.current.find((col) => {
+          return (
+            nextCarX + 1.2 > col.minX &&
+            nextCarX - 1.2 < col.maxX &&
+            nextCarZ + 1.2 > col.minZ &&
+            nextCarZ - 1.2 < col.maxZ
+          );
+        });
+
+        if (hitCol) {
+          const nameLower = hitCol.name.toLowerCase();
+          const isHouseOrBuilding =
+            nameLower.includes('house') ||
+            nameLower.includes('wall') ||
+            nameLower.includes('fence') ||
+            nameLower.includes('store') ||
+            nameLower.includes('shop') ||
+            nameLower.includes('dealership') ||
+            nameLower.includes('depot') ||
+            nameLower.includes('workplace');
+
+          if (isHouseOrBuilding && Math.abs(carPhys.speed) > 1.2) {
+            triggerHouseExplosion(carPhys.x, carPhys.z);
+            return;
+          } else {
+            // Low speed gentle bump
+            carPhys.speed = -carPhys.speed * 0.35;
+          }
         } else {
           carPhys.x = Math.max(-55, Math.min(75, nextCarX));
           carPhys.z = Math.max(-85, Math.min(85, nextCarZ));
@@ -1001,7 +1259,7 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
         const wheelRoll = (carPhys.speed / 0.35) * dt;
         carWheelsRef.current.forEach((w, idx) => {
           w.rotation.x += wheelRoll;
-          if (idx < 2) w.rotation.y = carPhys.steering * 0.8;
+          if (idx < 2) w.rotation.y = -carPhys.steering * 0.8;
         });
 
         cur.onSpeedUpdate(Math.round(Math.abs(carPhys.speed)));
@@ -1020,28 +1278,45 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
         camera.position.lerp(camOffset, 0.12);
         camera.lookAt(camTarget);
       } else {
-        // 2. ON-FOOT WALKING SIMULATION WITH SLIDING COLLISION & CAMERA-RELATIVE CONTROLS
+        // 2. ON-FOOT WALKING SIMULATION WITH SLIDING COLLISION & INTUITIVE CAMERA-RELATIVE CONTROLS
+        // W / Up: Moves AWAY from camera into screen (Forward)
+        // S / Down: Moves TOWARDS camera out of screen (Backward)
+        // A / Left: Moves Screen-Left
+        // D / Right: Moves Screen-Right
+        // (Character turns to face movement direction; movement is NEVER locked to character facing)
         playerGrp.visible = true;
         cur.onSpeedUpdate(0);
 
-        let inputX = 0;
-        let inputZ = 0;
-        if (keys.has('w') || keys.has('arrowup')) inputZ -= 1;
-        if (keys.has('s') || keys.has('arrowdown')) inputZ += 1;
-        if (keys.has('a') || keys.has('arrowleft')) inputX -= 1;
-        if (keys.has('d') || keys.has('arrowright')) inputX += 1;
+        let inputForward = 0;
+        let inputRight = 0;
+        if (keys.has('w') || keys.has('arrowup')) inputForward += 1;
+        if (keys.has('s') || keys.has('arrowdown')) inputForward -= 1;
+        if (keys.has('d') || keys.has('arrowright')) inputRight += 1;
+        if (keys.has('a') || keys.has('arrowleft')) inputRight -= 1;
 
-        const isWalking = inputX !== 0 || inputZ !== 0;
+        const isWalking = inputForward !== 0 || inputRight !== 0;
         const walkSpeed = keys.has('shift') ? 6.5 : 4.2;
 
         if (isWalking) {
-          // Camera-Relative Movement (W moves forward in camera view direction!)
-          const yaw = cameraYawRef.current;
-          const forwardVec = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
-          const rightVec = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
+          // Camera horizontal forward vector (from camera position towards player target)
+          // Camera position offset: (-sin(yaw) * cos(pitch) * dist, ..., -cos(yaw) * cos(pitch) * dist)
+          // Vector towards target (forward into the screen): (+sin(yaw), 0, +cos(yaw))
+          // Extract exact horizontal screen-forward and screen-right vectors from the active camera
+          camera.updateMatrixWorld();
+          const forwardVec = new THREE.Vector3();
+          camera.getWorldDirection(forwardVec);
+          forwardVec.y = 0;
+          forwardVec.normalize();
+
+          // Camera column 0 is local +X axis in world space, which directly points to screen-right
+          const rightVec = new THREE.Vector3();
+          rightVec.setFromMatrixColumn(camera.matrixWorld, 0);
+          rightVec.y = 0;
+          rightVec.normalize();
+
           const moveVec = new THREE.Vector3()
-            .addScaledVector(forwardVec, -inputZ)
-            .addScaledVector(rightVec, inputX)
+            .addScaledVector(forwardVec, inputForward)
+            .addScaledVector(rightVec, inputRight)
             .normalize();
 
           const curPos = humanPosRef.current;
@@ -1049,20 +1324,24 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
           const nextZ = curPos.z + moveVec.z * walkSpeed * dt;
           const pRadius = 0.38;
 
-          // Test X axis movement
+          // Test X axis movement against solid colliders
           if (!checkCollision(nextX, curPos.z, pRadius)) {
             curPos.x = nextX;
           }
-          // Test Z axis movement
+          // Test Z axis movement against solid colliders
           if (!checkCollision(curPos.x, nextZ, pRadius)) {
             curPos.z = nextZ;
           }
 
           playerGrp.position.copy(curPos);
 
+          // Smoothly rotate character to face the direction they are walking
           const targetRot = Math.atan2(moveVec.x, moveVec.z);
-          playerGrp.rotation.y = targetRot;
-          humanRotRef.current = targetRot;
+          let rotDiff = targetRot - playerGrp.rotation.y;
+          while (rotDiff < -Math.PI) rotDiff += Math.PI * 2;
+          while (rotDiff > Math.PI) rotDiff -= Math.PI * 2;
+          playerGrp.rotation.y += rotDiff * Math.min(1, dt * 18);
+          humanRotRef.current = playerGrp.rotation.y;
 
           walkPhase += dt * walkSpeed * 3;
           const swing = Math.sin(walkPhase) * 0.6;
@@ -1158,6 +1437,14 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
       {placementError && (
         <div className="pointer-events-none absolute top-20 left-1/2 -translate-x-1/2 z-30 px-4 py-2 rounded-xl bg-rose-500/90 text-white text-xs font-bold shadow-xl border border-white/20">
           {placementError}
+        </div>
+      )}
+
+      {/* Crash Explosion & Respawn Banner */}
+      {crashNotification && (
+        <div className="pointer-events-none absolute top-20 left-1/2 -translate-x-1/2 z-40 px-6 py-3 rounded-2xl bg-rose-600/95 backdrop-blur-md text-white font-extrabold shadow-2xl border-2 border-amber-400 animate-bounce flex items-center gap-3">
+          <span className="text-2xl">💥</span>
+          <span className="tracking-wide text-sm font-display">{crashNotification}</span>
         </div>
       )}
 

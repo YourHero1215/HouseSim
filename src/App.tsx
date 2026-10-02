@@ -401,10 +401,19 @@ export default function App() {
         {!isDrivingCar && (
           <div className="pointer-events-none absolute bottom-5 left-5 z-10 bg-slate-950/85 backdrop-blur-md border border-white/10 rounded-2xl p-3.5 text-xs text-slate-300 space-y-1.5 shadow-xl">
             <div className="flex items-center gap-2">
-              <kbd className="px-1.5 py-0.5 bg-slate-800 rounded font-mono text-white text-[11px]">WASD / Arrows</kbd>
-              <span>Walk & Sprint (Shift)</span>
+              <kbd className="px-1.5 py-0.5 bg-slate-800 rounded font-mono text-white text-[11px]">W / ↑</kbd>
+              <span>Forward (into screen)</span>
+              <kbd className="px-1.5 py-0.5 bg-slate-800 rounded font-mono text-white text-[11px]">S / ↓</kbd>
+              <span>Backward</span>
             </div>
             <div className="flex items-center gap-2">
+              <kbd className="px-1.5 py-0.5 bg-slate-800 rounded font-mono text-white text-[11px]">A / ←</kbd>
+              <span>Left</span>
+              <kbd className="px-1.5 py-0.5 bg-slate-800 rounded font-mono text-white text-[11px]">D / →</kbd>
+              <span>Right</span>
+              <span className="text-[11px] text-slate-400">· Shift: Sprint</span>
+            </div>
+            <div className="flex items-center gap-2 pt-0.5 border-t border-white/5">
               <kbd className="px-1.5 py-0.5 bg-emerald-500/20 border border-emerald-500/40 rounded font-mono text-emerald-300 text-[11px]">E</kbd>
               <span>Enter Car · Enter Shops · Talk to NPCs · Pet Animals</span>
             </div>

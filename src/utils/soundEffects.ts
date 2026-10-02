@@ -223,6 +223,65 @@ class SoundController {
     osc.start(now);
     osc.stop(now + 0.05);
   }
+
+  playLowPolyExplosion() {
+    const ctx = this.getContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+
+    // 1. Deep Sub-Bass Explosion Boom
+    const boomOsc = ctx.createOscillator();
+    const boomGain = ctx.createGain();
+    boomOsc.type = 'sawtooth';
+    boomOsc.frequency.setValueAtTime(150, now);
+    boomOsc.frequency.exponentialRampToValueAtTime(28, now + 0.55);
+    boomGain.gain.setValueAtTime(0.35, now);
+    boomGain.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
+    boomOsc.connect(boomGain);
+    boomGain.connect(ctx.destination);
+    boomOsc.start(now);
+    boomOsc.stop(now + 0.65);
+
+    // 2. White Noise Debris Burst
+    try {
+      const bufferSize = Math.floor(ctx.sampleRate * 0.45);
+      const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const output = noiseBuffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        output[i] = Math.random() * 2 - 1;
+      }
+      const whiteNoise = ctx.createBufferSource();
+      whiteNoise.buffer = noiseBuffer;
+
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(900, now);
+      filter.frequency.linearRampToValueAtTime(180, now + 0.4);
+
+      const noiseGain = ctx.createGain();
+      noiseGain.gain.setValueAtTime(0.28, now);
+      noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+
+      whiteNoise.connect(filter);
+      filter.connect(noiseGain);
+      noiseGain.connect(ctx.destination);
+      whiteNoise.start(now);
+    } catch {}
+
+    // 3. Retro Low-Poly Debris Clatter
+    [240, 180, 120].forEach((freq, idx) => {
+      const clatter = ctx.createOscillator();
+      const clatterGain = ctx.createGain();
+      clatter.type = 'triangle';
+      clatter.frequency.setValueAtTime(freq, now + idx * 0.05);
+      clatterGain.gain.setValueAtTime(0.12, now + idx * 0.05);
+      clatterGain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.05 + 0.2);
+      clatter.connect(clatterGain);
+      clatterGain.connect(ctx.destination);
+      clatter.start(now + idx * 0.05);
+      clatter.stop(now + idx * 0.05 + 0.22);
+    });
+  }
 }
 
 export const soundFX = new SoundController();
