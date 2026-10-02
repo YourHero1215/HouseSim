@@ -119,8 +119,34 @@ export interface PlayerState {
 
 export interface CarPhysics {
   x: number;
+  y?: number;
+  z: number;
+  rotationY: number;
+  pitchX?: number;
+  speed: number;
+  steering: number;
+  vy?: number;
+  fuel?: number; // 0 to 100%
+}
+
+export type ActiveVehicleType = 'car' | 'boat' | 'helicopter' | null;
+
+export interface BoatPhysics {
+  x: number;
   z: number;
   rotationY: number;
   speed: number;
   steering: number;
+}
+
+export interface HelicopterPhysics {
+  x: number;
+  y: number;
+  z: number;
+  rotationY: number;
+  speed: number;
+  verticalSpeed: number;
+  tiltPitch: number;
+  tiltRoll: number;
+  rotorSpeed: number;
 }

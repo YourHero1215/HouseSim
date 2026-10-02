@@ -1,15 +1,20 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import {
+  ActiveVehicleType,
+  BoatPhysics,
   CarPhysics,
   CarVehicle,
   CatalogItem,
+  HelicopterPhysics,
   NPCData,
   PlacedItem,
   PlacedPet,
 } from '../types/housesim';
 import {
+  buildBoat3DModel,
   buildCar3DModel,
+  buildHelicopter3DModel,
   buildItem3DModel,
   buildPet3DModel,
 } from '../utils/world3DBuilder';
@@ -27,6 +32,18 @@ interface VirtualHouseCanvasProps {
   isDrivingCar: boolean;
   onEnterCar: () => void;
   onExitCar: () => void;
+  activeVehicle?: ActiveVehicleType;
+  onEnterVehicle?: (type: 'car' | 'boat' | 'helicopter') => void;
+  onExitVehicle?: () => void;
+  onAltitudeUpdate?: (altMeters: number) => void;
+  initialBoatPos?: { x: number; z: number; rotationY: number };
+  initialHeliPos?: { x: number; y: number; z: number; rotationY: number };
+  onSavePositions?: (
+    playerPos: [number, number, number],
+    carPos: { x: number; z: number; rotationY: number },
+    boatPos?: { x: number; z: number; rotationY: number },
+    heliPos?: { x: number; y: number; z: number; rotationY: number }
+  ) => void;
   onPlaceItem: (
     item: CatalogItem,
     position: [number, number, number],
@@ -40,6 +57,17 @@ interface VirtualHouseCanvasProps {
   onOpenShop: (tab?: string) => void;
   onOpenWorkplace: () => void;
   onSpeedUpdate: (speedMph: number) => void;
+  onBonusCash?: (amount: number, reason: string) => void;
+  onShowToast?: (message: string) => void;
+  initialPlayerPos?: [number, number, number];
+  initialCarPos?: { x: number; z: number; rotationY: number };
+  carFuel?: number;
+  hasGasJug?: boolean;
+  onFuelUpdate?: (fuel: number) => void;
+  onBuyGasJug?: () => void;
+  onRefuelCarWithJug?: () => void;
+  onRefuelAtPump?: () => void;
+  respawnSignal?: number;
 }
 
 interface BoxCollider {
@@ -61,6 +89,14 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
   isDrivingCar,
   onEnterCar,
   onExitCar,
+  activeVehicle,
+  onEnterVehicle,
+  onExitVehicle,
+  onAltitudeUpdate,
+  initialBoatPos,
+  initialHeliPos,
+  onBonusCash,
+  onShowToast,
   onPlaceItem,
   onCancelPlacing,
   onInteractWithNPC,
@@ -68,10 +104,21 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
   onOpenShop,
   onOpenWorkplace,
   onSpeedUpdate,
+  initialPlayerPos,
+  initialCarPos,
+  onSavePositions,
+  carFuel = 100,
+  hasGasJug = false,
+  onFuelUpdate,
+  onBuyGasJug,
+  onRefuelCarWithJug,
+  onRefuelAtPump,
+  respawnSignal,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [placementError, setPlacementError] = useState<string | null>(null);
   const [crashNotification, setCrashNotification] = useState<string | null>(null);
+  const [nearbyPrompt, setNearbyPrompt] = useState<{ text: string; icon: string; actionId: string } | null>(null);
 
   const isExplodingRef = useRef<boolean>(false);
   const explosionTimerRef = useRef<number>(0);
@@ -79,6 +126,7 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
 
   // Latest props reference for 60fps animation loop
   const stateRef = useRef({
+    playerCash,
     houseTier,
     placedItems,
     ownedCars,
@@ -88,6 +136,12 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
     isDrivingCar,
     onEnterCar,
     onExitCar,
+    activeVehicle,
+    onEnterVehicle,
+    onExitVehicle,
+    onAltitudeUpdate,
+    onBonusCash,
+    onShowToast,
     onPlaceItem,
     onCancelPlacing,
     onInteractWithNPC,
@@ -95,10 +149,22 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
     onOpenShop,
     onOpenWorkplace,
     onSpeedUpdate,
+    initialPlayerPos,
+    initialCarPos,
+    initialBoatPos,
+    initialHeliPos,
+    onSavePositions,
+    carFuel,
+    hasGasJug,
+    onFuelUpdate,
+    onBuyGasJug,
+    onRefuelCarWithJug,
+    onRefuelAtPump,
   });
 
   useEffect(() => {
     stateRef.current = {
+      playerCash,
       houseTier,
       placedItems,
       ownedCars,
@@ -108,6 +174,12 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
       isDrivingCar,
       onEnterCar,
       onExitCar,
+      activeVehicle,
+      onEnterVehicle,
+      onExitVehicle,
+      onAltitudeUpdate,
+      onBonusCash,
+      onShowToast,
       onPlaceItem,
       onCancelPlacing,
       onInteractWithNPC,
@@ -115,6 +187,17 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
       onOpenShop,
       onOpenWorkplace,
       onSpeedUpdate,
+      initialPlayerPos,
+      initialCarPos,
+      initialBoatPos,
+      initialHeliPos,
+      onSavePositions,
+      carFuel,
+      hasGasJug,
+      onFuelUpdate,
+      onBuyGasJug,
+      onRefuelCarWithJug,
+      onRefuelAtPump,
     };
   });
 
@@ -128,19 +211,69 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
   const wallMeshesRef = useRef<THREE.Mesh[]>([]);
   const floorMeshesRef = useRef<THREE.Mesh[]>([]);
   const backyardMeshesRef = useRef<THREE.Mesh[]>([]);
+  const drivewayRef = useRef<THREE.Mesh | null>(null);
+  const groundMeshRef = useRef<THREE.Mesh | null>(null);
   const collidersRef = useRef<BoxCollider[]>([]);
 
-  // Car Physics State
+  // Vehicles Physics State (Persisted)
   const carPhysicsRef = useRef<CarPhysics>({
-    x: -4.0,
-    z: 14.0,
-    rotationY: Math.PI / 2,
+    x: initialCarPos?.x ?? -4.0,
+    z: initialCarPos?.z ?? 14.0,
+    rotationY: initialCarPos?.rotationY ?? Math.PI / 2,
     speed: 0,
     steering: 0,
   });
 
-  // Human Position State
-  const humanPosRef = useRef<THREE.Vector3>(new THREE.Vector3(-10.0, 0, 7.5));
+  const boatPhysicsRef = useRef<BoatPhysics>({
+    x: initialBoatPos?.x ?? -142,
+    z: initialBoatPos?.z ?? 110,
+    rotationY: initialBoatPos?.rotationY ?? -Math.PI / 2,
+    speed: 0,
+    steering: 0,
+  });
+
+  const helicopterPhysicsRef = useRef<HelicopterPhysics>({
+    x: initialHeliPos?.x ?? 125,
+    y: initialHeliPos?.y ?? 0.18,
+    z: initialHeliPos?.z ?? -50,
+    rotationY: initialHeliPos?.rotationY ?? 0,
+    speed: 0,
+    verticalSpeed: 0,
+    tiltPitch: 0,
+    tiltRoll: 0,
+    rotorSpeed: 0,
+  });
+
+  // Vehicle Meshes Refs
+  const activeBoatGroupRef = useRef<THREE.Group | null>(null);
+  const boatPropellersRef = useRef<THREE.Mesh[]>([]);
+  const boatWakeGroupRef = useRef<THREE.Group | null>(null);
+
+  const activeHeliGroupRef = useRef<THREE.Group | null>(null);
+  const mainRotorRef = useRef<THREE.Group | null>(null);
+  const tailRotorRef = useRef<THREE.Group | null>(null);
+  const heliBeaconLightRef = useRef<THREE.PointLight | null>(null);
+  const heliGroundRingRef = useRef<THREE.Mesh | null>(null);
+
+  // Interactive City Elements Refs
+  const campfireActiveRef = useRef<boolean>(true);
+  const campfireFlamesRef = useRef<THREE.Group | null>(null);
+  const campfireLightRef = useRef<THREE.PointLight | null>(null);
+  const cinemaScreenMeshRef = useRef<THREE.Mesh | null>(null);
+  const cinemaChannelRef = useRef<number>(0);
+  const fountainSparklesRef = useRef<THREE.Group | null>(null);
+  const telescopeActiveRef = useRef<boolean>(false);
+  const speedTrapCooldownRef = useRef<number>(0);
+  const stuntJumpCooldownRef = useRef<number>(0);
+
+  // Human Position State (Persisted)
+  const humanPosRef = useRef<THREE.Vector3>(
+    new THREE.Vector3(
+      initialPlayerPos ? initialPlayerPos[0] : -10.0,
+      0,
+      initialPlayerPos ? initialPlayerPos[2] : 7.5
+    )
+  );
   const humanRotRef = useRef<number>(0);
 
   // Camera Orbit & Zoom State (0.0 aligns directly with North-South avenues and house hallways)
@@ -179,6 +312,98 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
       group.add(model);
     });
   }, [placedItems]);
+
+  // Sync Ghost Placement Preview Model
+  useEffect(() => {
+    const ghostGroup = ghostMeshRef.current;
+    if (!ghostGroup) return;
+
+    while (ghostGroup.children.length > 0) {
+      ghostGroup.remove(ghostGroup.children[0]);
+    }
+
+    if (!activePlacingItem) {
+      ghostGroup.visible = false;
+      setPlacementError(null);
+      return;
+    }
+
+    const model = buildItem3DModel(activePlacingItem, true);
+    // Make transparent preview material
+    model.traverse((child) => {
+      if ((child as THREE.Mesh).isMesh) {
+        const m = child as THREE.Mesh;
+        if (Array.isArray(m.material)) {
+          m.material = m.material.map((mat) => {
+            const clone = mat.clone();
+            clone.transparent = true;
+            clone.opacity = 0.7;
+            return clone;
+          });
+        } else if (m.material) {
+          const clone = m.material.clone();
+          clone.transparent = true;
+          clone.opacity = 0.7;
+          m.material = clone;
+        }
+      }
+    });
+
+    // Circular green placement indicator ring at base
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.5, 0.75, 24),
+      new THREE.MeshBasicMaterial({ color: 0x10b981, side: THREE.DoubleSide, transparent: true, opacity: 0.85 })
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.02;
+    ghostGroup.add(ring);
+    ghostGroup.add(model);
+
+    // Initial position in front of player
+    ghostGroup.position.set(humanPosRef.current.x, 0.05, humanPosRef.current.z);
+    ghostGroup.visible = true;
+  }, [activePlacingItem]);
+
+  // Handle Vehicle Respawn Signal
+  useEffect(() => {
+    if (!respawnSignal || respawnSignal === 0) return;
+
+    // Reset Car to Home Driveway
+    carPhysicsRef.current.x = -4.0;
+    carPhysicsRef.current.z = 14.0;
+    carPhysicsRef.current.rotationY = Math.PI / 2;
+    carPhysicsRef.current.speed = 0;
+    carPhysicsRef.current.steering = 0;
+    if (activeCarGroupRef.current) {
+      activeCarGroupRef.current.position.set(-4.0, 0, 14.0);
+      activeCarGroupRef.current.rotation.y = Math.PI / 2;
+    }
+
+    // Reset Boat to Marina Slip
+    boatPhysicsRef.current.x = -142;
+    boatPhysicsRef.current.z = 110;
+    boatPhysicsRef.current.rotationY = -Math.PI / 2;
+    boatPhysicsRef.current.speed = 0;
+    boatPhysicsRef.current.steering = 0;
+    if (activeBoatGroupRef.current) {
+      activeBoatGroupRef.current.position.set(-142, 0.25, 110);
+      activeBoatGroupRef.current.rotation.y = -Math.PI / 2;
+    }
+
+    // Reset Helicopter to Airport Helipad
+    helicopterPhysicsRef.current.x = 125;
+    helicopterPhysicsRef.current.y = 0.18;
+    helicopterPhysicsRef.current.z = -50;
+    helicopterPhysicsRef.current.rotationY = 0;
+    helicopterPhysicsRef.current.speed = 0;
+    helicopterPhysicsRef.current.verticalSpeed = 0;
+    helicopterPhysicsRef.current.tiltPitch = 0;
+    helicopterPhysicsRef.current.tiltRoll = 0;
+    if (activeHeliGroupRef.current) {
+      activeHeliGroupRef.current.position.set(125, 0.18, -50);
+      activeHeliGroupRef.current.rotation.set(0, 0, 0);
+    }
+  }, [respawnSignal]);
 
   // Main Scene Initialization
   useEffect(() => {
@@ -239,46 +464,61 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
       });
     };
 
-    // Ground Plane
+    // Ground Plane: EXPANDED OPEN-WORLD TERRAIN (520m x 520m)
     const groundMat = new THREE.MeshStandardMaterial({ color: 0x14231b, roughness: 0.95 });
-    const groundMesh = new THREE.Mesh(new THREE.PlaneGeometry(240, 240), groundMat);
+    const groundMesh = new THREE.Mesh(new THREE.PlaneGeometry(520, 520), groundMat);
     groundMesh.rotation.x = -Math.PI / 2;
     groundMesh.position.y = -0.05;
     groundMesh.receiveShadow = true;
     scene.add(groundMesh);
+    groundMeshRef.current = groundMesh;
 
     // =========================================================================
-    // 1. EXPANDED MULTI-BLOCK CITY ROAD SYSTEM (Avenues & Cross-Streets)
+    // 1. MASSIVE MULTI-DISTRICT ROAD NETWORK (3 North-South Avenues & 3 Crossways)
     // =========================================================================
     const roadMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.75 });
     const stripeYellow = new THREE.MeshBasicMaterial({ color: 0xfacc15 });
     const stripeWhite = new THREE.MeshBasicMaterial({ color: 0xf8fafc });
     const sidewalkMat = new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.7 });
 
-    // Main North-South Avenue (x: 4 to 13, z: -85 to +85)
-    const mainAve = new THREE.Mesh(new THREE.PlaneGeometry(9.5, 180), roadMat);
-    mainAve.rotation.x = -Math.PI / 2;
-    mainAve.position.set(8.5, 0.01, 0);
-    mainAve.receiveShadow = true;
-    scene.add(mainAve);
+    const addRoadSegment = (cx: number, cz: number, w: number, d: number, isNorthSouth: boolean) => {
+      const road = new THREE.Mesh(new THREE.PlaneGeometry(w, d), roadMat);
+      road.rotation.x = -Math.PI / 2;
+      road.position.set(cx, 0.01, cz);
+      road.receiveShadow = true;
+      scene.add(road);
 
-    // Main Avenue Centerlines
-    for (let z = -80; z <= 80; z += 5) {
-      if (Math.abs(z - (-6)) < 6) continue; // Skip intersection center
-      const s = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 2.8), stripeYellow);
-      s.rotation.x = -Math.PI / 2;
-      s.position.set(8.5, 0.02, z);
-      scene.add(s);
-    }
+      // Center yellow stripe markers
+      if (isNorthSouth) {
+        for (let z = cz - d * 0.5 + 4; z <= cz + d * 0.5 - 4; z += 6) {
+          if (Math.abs(z - (-6)) < 6 || Math.abs(z - (-80)) < 6 || Math.abs(z - 80) < 6) continue;
+          const s = new THREE.Mesh(new THREE.PlaneGeometry(0.24, 3.2), stripeYellow);
+          s.rotation.x = -Math.PI / 2;
+          s.position.set(cx, 0.02, z);
+          scene.add(s);
+        }
+      } else {
+        for (let x = cx - w * 0.5 + 4; x <= cx + w * 0.5 - 4; x += 6) {
+          if (Math.abs(x - 8.5) < 6 || Math.abs(x - (-75)) < 6 || Math.abs(x - 85) < 6) continue;
+          const s = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 0.24), stripeYellow);
+          s.rotation.x = -Math.PI / 2;
+          s.position.set(x, 0.02, cz);
+          scene.add(s);
+        }
+      }
+    };
 
-    // Cross East-West Boulevard (x: -45 to 75, z: -10 to -2)
-    const crossBlvd = new THREE.Mesh(new THREE.PlaneGeometry(120, 8.5), roadMat);
-    crossBlvd.rotation.x = -Math.PI / 2;
-    crossBlvd.position.set(15, 0.012, -6);
-    crossBlvd.receiveShadow = true;
-    scene.add(crossBlvd);
+    // 3 Major North-South Avenues (Length 350m each)
+    addRoadSegment(8.5, 0, 9.5, 350, true); // Central Grand Avenue
+    addRoadSegment(-75, 0, 9.0, 350, true); // West Highway (Mountain & Beach)
+    addRoadSegment(85, 0, 9.0, 350, true); // East Boulevard (Airport & Speedway)
 
-    // Zebra Crosswalks at 4-Way Intersection
+    // 3 Major East-West Crossways (Length 330m each)
+    addRoadSegment(5, -80, 330, 9.0, false); // North Expressway (Mall & Lookout)
+    addRoadSegment(5, -6, 330, 9.0, false); // Central Boulevard (Downtown & Shops)
+    addRoadSegment(5, 80, 330, 9.0, false); // South Coast Highway (Beach & Cinema)
+
+    // Zebra Crosswalks at Major Intersections
     const createCrosswalk = (cx: number, cz: number, isHoriz: boolean) => {
       for (let i = -3; i <= 3; i++) {
         const stripe = new THREE.Mesh(new THREE.PlaneGeometry(0.6, 2.2), stripeWhite);
@@ -292,10 +532,14 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
         scene.add(stripe);
       }
     };
-    createCrosswalk(8.5, 2.5, true); // South crosswalk
-    createCrosswalk(8.5, -14.5, true); // North crosswalk
-    createCrosswalk(2.0, -6, false); // West crosswalk
-    createCrosswalk(15.0, -6, false); // East crosswalk
+    [8.5, -75, 85].forEach((rx) => {
+      [-80, -6, 80].forEach((rz) => {
+        createCrosswalk(rx, rz + 5.5, true);
+        createCrosswalk(rx, rz - 5.5, true);
+        createCrosswalk(rx - 5.5, rz, false);
+        createCrosswalk(rx + 5.5, rz, false);
+      });
+    });
 
     // Sidewalks
     const addSidewalk = (x: number, z: number, w: number, d: number) => {
@@ -305,20 +549,20 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
       scene.add(sw);
     };
 
-    addSidewalk(1.8, 42, 3.4, 76); // West sidewalk South
-    addSidewalk(1.8, -48, 3.4, 76); // West sidewalk North
-    addSidewalk(15.5, 42, 3.4, 76); // East sidewalk South
-    addSidewalk(15.5, -48, 3.4, 76); // East sidewalk North
+    addSidewalk(1.8, 42, 3.4, 76);
+    addSidewalk(1.8, -48, 3.4, 76);
+    addSidewalk(15.5, 42, 3.4, 76);
+    addSidewalk(15.5, -48, 3.4, 76);
 
-    // Street Lamps along Sidewalks
-    for (let z = -70; z <= 70; z += 24) {
-      if (Math.abs(z - (-6)) < 12) continue;
+    // Street Lamps along Grand Avenue & Intersections
+    for (let z = -140; z <= 140; z += 28) {
+      if (Math.abs(z - (-6)) < 12 || Math.abs(z - (-80)) < 12 || Math.abs(z - 80) < 12) continue;
       const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 5.2, 8), new THREE.MeshStandardMaterial({ color: 0x334155 }));
-      pole.position.set(16.4, 2.6, z);
+      pole.position.set(15.5, 2.6, z);
       scene.add(pole);
 
       const lampHead = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.2, 0.4), new THREE.MeshBasicMaterial({ color: 0xfef08a }));
-      lampHead.position.set(16.1, 5.1, z);
+      lampHead.position.set(15.2, 5.1, z);
       scene.add(lampHead);
     }
 
@@ -334,6 +578,7 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
     driveway.position.set(-4.5, 0.02, 14);
     driveway.receiveShadow = true;
     scene.add(driveway);
+    drivewayRef.current = driveway;
 
     // Rebuild House with Real Doorway Openings and Solid Wall Colliders
     const rebuildHouse = (tier: number) => {
@@ -568,17 +813,81 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
     // 6. Grand City Bank & Financial Center (x: 48, z: -20)
     createWalkableBuilding('Grand City Bank', 48, -20, 15, 13, '#1c1917', '#eab308', 'bank');
 
-    // 7. Metro Gas Station & EV Fast Charging (x: 28, z: 48)
-    const gasCanopy = new THREE.Mesh(new THREE.BoxGeometry(16, 0.4, 12), new THREE.MeshStandardMaterial({ color: 0xef4444 }));
-    gasCanopy.position.set(28, 4.2, 48);
+    // 7. Metro Gas Station & Emergency Refuel Station (x: 28, z: 48)
+    const gasCanopy = new THREE.Mesh(new THREE.BoxGeometry(18, 0.5, 14), new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.4 }));
+    gasCanopy.position.set(28, 4.4, 48);
     cityGroup.add(gasCanopy);
-    // Gas Pumps (Colliders)
+
+    // Yellow Canopy Border Trim
+    const canopyTrim = new THREE.Mesh(new THREE.BoxGeometry(18.2, 0.2, 14.2), new THREE.MeshStandardMaterial({ color: 0xfacc15 }));
+    canopyTrim.position.set(28, 4.15, 48);
+    cityGroup.add(canopyTrim);
+
+    // Canopy Illuminated Sign "METRO GAS"
+    const gasSignMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(10, 0.8, 0.25),
+      new THREE.MeshBasicMaterial({ color: 0xfef08a })
+    );
+    gasSignMesh.position.set(28, 4.8, 41);
+    cityGroup.add(gasSignMesh);
+
+    // 4 Canopy Steel Support Pillars
+    [
+      [21, 43],
+      [35, 43],
+      [21, 53],
+      [35, 53],
+    ].forEach(([px, pz], idx) => {
+      const pillar = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.22, 0.25, 4.4, 8),
+        new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.3 })
+      );
+      pillar.position.set(px, 2.2, pz);
+      cityGroup.add(pillar);
+      registerCollider(px - 0.4, px + 0.4, pz - 0.4, pz + 0.4, `Gas Station Pillar ${idx + 1}`);
+    });
+
+    // 2 Dual Electronic Gas Pumps with LED Fuel Meters
     for (const pz of [45, 51]) {
-      const pump = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.8, 0.8), new THREE.MeshStandardMaterial({ color: 0xf8fafc }));
-      pump.position.set(28, 0.9, pz);
-      cityGroup.add(pump);
-      registerCollider(27.3, 28.7, pz - 0.5, pz + 0.5, 'Gas Pump');
+      const pumpGroup = new THREE.Group();
+      pumpGroup.position.set(28, 0, pz);
+
+      const pumpBody = new THREE.Mesh(
+        new THREE.BoxGeometry(1.4, 2.0, 0.9),
+        new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.5 })
+      );
+      pumpBody.position.y = 1.0;
+
+      const pumpScreen = new THREE.Mesh(
+        new THREE.BoxGeometry(0.9, 0.5, 0.95),
+        new THREE.MeshBasicMaterial({ color: 0x22c55e })
+      );
+      pumpScreen.position.y = 1.35;
+
+      const pumpTop = new THREE.Mesh(
+        new THREE.BoxGeometry(1.45, 0.25, 0.95),
+        new THREE.MeshStandardMaterial({ color: 0xef4444 })
+      );
+      pumpTop.position.y = 2.05;
+
+      pumpGroup.add(pumpBody, pumpScreen, pumpTop);
+      pumpGroup.userData = { isGasPump: true };
+      cityGroup.add(pumpGroup);
+      registerCollider(27.1, 28.9, pz - 0.6, pz + 0.6, 'Metro Gas Pump');
     }
+
+    // Gas Price Totem / Signpost
+    const pricePole = new THREE.Mesh(new THREE.BoxGeometry(0.3, 4.5, 0.3), new THREE.MeshStandardMaterial({ color: 0x334155 }));
+    pricePole.position.set(36, 2.25, 40);
+    const priceBoard = new THREE.Mesh(new THREE.BoxGeometry(2.4, 1.6, 0.4), new THREE.MeshStandardMaterial({ color: 0x0f172a }));
+    priceBoard.position.set(36, 3.7, 40);
+    const priceLcd = new THREE.Mesh(new THREE.PlaneGeometry(2.1, 1.2), new THREE.MeshBasicMaterial({ color: 0x10b981 }));
+    priceLcd.position.set(36, 3.7, 40.22);
+    cityGroup.add(pricePole, priceBoard, priceLcd);
+    registerCollider(35.5, 36.5, 39.5, 40.5, 'Gas Station Price Sign');
+
+    // Gas Station 24/7 Snack & Convenience Mart
+    createWalkableBuilding('Metro 24/7 Gas Mart', 15, 48, 11, 10, '#0f172a', '#22c55e', 'furniture');
 
     // 8. Central City Park & Plaza (x: 46, z: 48, 24m x 24m)
     const parkFloor = new THREE.Mesh(new THREE.PlaneGeometry(24, 24), new THREE.MeshStandardMaterial({ color: 0x15803d, roughness: 0.9 }));
@@ -608,6 +917,345 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
       cityGroup.add(foliage);
       registerCollider(tx - 0.4, tx + 0.4, tz - 0.4, tz + 0.4, 'Park Tree');
     }
+
+    // =========================================================================
+    // 3. EXPANDED OPEN-WORLD DISTRICTS & DESTINATIONS
+    // =========================================================================
+
+    // A. SUNSET BEACH & MARINA (South-West: X: -115, Z: 110)
+    const beachSand = new THREE.Mesh(
+      new THREE.PlaneGeometry(80, 80),
+      new THREE.MeshStandardMaterial({ color: 0xfef08a, roughness: 0.95 })
+    );
+    beachSand.rotation.x = -Math.PI / 2;
+    beachSand.position.set(-115, 0.02, 110);
+    beachSand.receiveShadow = true;
+    cityGroup.add(beachSand);
+
+    const oceanWater = new THREE.Mesh(
+      new THREE.PlaneGeometry(120, 120),
+      new THREE.MeshStandardMaterial({
+        color: 0x0284c7,
+        roughness: 0.15,
+        metalness: 0.1,
+        transparent: true,
+        opacity: 0.85,
+      })
+    );
+    oceanWater.rotation.x = -Math.PI / 2;
+    oceanWater.position.set(-165, 0.04, 110);
+    cityGroup.add(oceanWater);
+
+    const pierWood = new THREE.Mesh(
+      new THREE.BoxGeometry(8, 0.4, 55),
+      new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.7 })
+    );
+    pierWood.position.set(-125, 0.22, 110);
+    pierWood.receiveShadow = true;
+    cityGroup.add(pierWood);
+
+    for (let pz = 86; pz <= 134; pz += 12) {
+      const postL = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.2, 0.2, 2.5, 8),
+        new THREE.MeshStandardMaterial({ color: 0x451a03 })
+      );
+      postL.position.set(-128.5, -0.6, pz);
+      const postR = postL.clone();
+      postR.position.x = -121.5;
+      cityGroup.add(postL, postR);
+    }
+
+    // Marina Docking Gangway connecting Pier to Boat Slip
+    const gangway = new THREE.Mesh(
+      new THREE.BoxGeometry(10, 0.35, 4.0),
+      new THREE.MeshStandardMaterial({ color: 0x92400e, roughness: 0.6 })
+    );
+    gangway.position.set(-133, 0.22, 110);
+    cityGroup.add(gangway);
+
+    // Dock Cleats and Life Buoy
+    const buoy = new THREE.Mesh(
+      new THREE.TorusGeometry(0.35, 0.1, 8, 16),
+      new THREE.MeshStandardMaterial({ color: 0xef4444 })
+    );
+    buoy.position.set(-129, 0.6, 110);
+    buoy.rotation.y = Math.PI / 2;
+    cityGroup.add(buoy);
+
+    // Beach Lounger & Umbrella
+    const loungerGroup = new THREE.Group();
+    loungerGroup.position.set(-102, 0.05, 108);
+    const lBed = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.3, 2.4), new THREE.MeshStandardMaterial({ color: 0x38bdf8 }));
+    const lPillow = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.15, 0.5), new THREE.MeshStandardMaterial({ color: 0xf8fafc }));
+    lPillow.position.set(0, 0.22, 0.85);
+    const uPole = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 2.8, 6), new THREE.MeshStandardMaterial({ color: 0xf59e0b }));
+    uPole.position.set(1.2, 1.4, 0);
+    const uTop = new THREE.Mesh(new THREE.ConeGeometry(1.8, 0.8, 8), new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.5 }));
+    uTop.position.set(1.2, 2.7, 0);
+    loungerGroup.add(lBed, lPillow, uPole, uTop);
+    loungerGroup.userData = { isBeachLounger: true };
+    cityGroup.add(loungerGroup);
+
+    // Boardwalk Smoothie & Snack Shack
+    const smoothieShack = new THREE.Group();
+    smoothieShack.position.set(-110, 0.05, 92);
+    const sBody = new THREE.Mesh(new THREE.BoxGeometry(4.2, 3.0, 3.6), new THREE.MeshStandardMaterial({ color: 0x10b981 }));
+    sBody.position.y = 1.5;
+    const sRoof = new THREE.Mesh(new THREE.ConeGeometry(3.5, 1.2, 4), new THREE.MeshStandardMaterial({ color: 0xfacc15 }));
+    sRoof.rotation.y = Math.PI / 4;
+    sRoof.position.y = 3.6;
+    const sCounter = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.9, 0.6), new THREE.MeshStandardMaterial({ color: 0x78350f }));
+    sCounter.position.set(0, 0.9, 1.9);
+    smoothieShack.add(sBody, sRoof, sCounter);
+    smoothieShack.userData = { isSmoothieStand: true };
+    cityGroup.add(smoothieShack);
+    registerCollider(-113, -107, 89, 95, 'Boardwalk Smoothie Shack');
+
+    for (const [px, pz] of [
+      [-95, 90],
+      [-95, 110],
+      [-95, 130],
+      [-105, 82],
+      [-105, 138],
+    ]) {
+      const trunk = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.18, 0.26, 4.0, 8),
+        new THREE.MeshStandardMaterial({ color: 0x92400e })
+      );
+      trunk.position.set(px, 2.0, pz);
+      const leaves = new THREE.Mesh(
+        new THREE.ConeGeometry(2.4, 1.2, 7),
+        new THREE.MeshStandardMaterial({ color: 0x15803d, roughness: 0.8 })
+      );
+      leaves.position.set(px, 4.2, pz);
+      cityGroup.add(trunk, leaves);
+      registerCollider(px - 0.3, px + 0.3, pz - 0.3, pz + 0.3, 'Palm Tree');
+    }
+
+    // B. GRAND PRIX SPEEDWAY & STUNT ARENA (South-East: X: 125, Z: 35)
+    const trackPad = new THREE.Mesh(
+      new THREE.PlaneGeometry(80, 80),
+      new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.8 })
+    );
+    trackPad.rotation.x = -Math.PI / 2;
+    trackPad.position.set(125, 0.015, 35);
+    trackPad.receiveShadow = true;
+    cityGroup.add(trackPad);
+
+    const curbMatR = new THREE.MeshStandardMaterial({ color: 0xef4444 });
+    const curbMatW = new THREE.MeshStandardMaterial({ color: 0xffffff });
+    for (let i = 0; i < 18; i++) {
+      const curb = new THREE.Mesh(
+        new THREE.BoxGeometry(2.0, 0.18, 0.6),
+        i % 2 === 0 ? curbMatR : curbMatW
+      );
+      curb.position.set(88 + i * 2.0, 0.09, -2);
+      cityGroup.add(curb);
+    }
+
+    const rampGeo = new THREE.BoxGeometry(9.0, 0.4, 14.0);
+    const ramp = new THREE.Mesh(
+      rampGeo,
+      new THREE.MeshStandardMaterial({ color: 0xf97316, roughness: 0.4 })
+    );
+    ramp.rotation.x = -0.22;
+    ramp.position.set(125, 1.3, 35);
+    ramp.castShadow = true;
+    ramp.receiveShadow = true;
+    cityGroup.add(ramp);
+
+    const bleacher = new THREE.Mesh(
+      new THREE.BoxGeometry(32, 4.0, 6.0),
+      new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.6 })
+    );
+    bleacher.position.set(125, 2.0, 70);
+    bleacher.castShadow = true;
+    cityGroup.add(bleacher);
+    registerCollider(108, 142, 66, 74, 'Speedway Bleachers');
+
+    // C. METRO AIRPORT & FLIGHT CENTER (North-East: X: 125, Z: -115)
+    const runway = new THREE.Mesh(
+      new THREE.PlaneGeometry(20, 120),
+      new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.9 })
+    );
+    runway.rotation.x = -Math.PI / 2;
+    runway.position.set(125, 0.015, -115);
+    runway.receiveShadow = true;
+    cityGroup.add(runway);
+
+    for (let rz = -165; rz <= -65; rz += 8) {
+      const rStripe = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 4.0), stripeWhite);
+      rStripe.rotation.x = -Math.PI / 2;
+      rStripe.position.set(125, 0.02, rz);
+      cityGroup.add(rStripe);
+    }
+
+    const hangar = new THREE.Mesh(
+      new THREE.BoxGeometry(24, 7.5, 20),
+      new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.5 })
+    );
+    hangar.position.set(100, 3.75, -115);
+    hangar.castShadow = true;
+    cityGroup.add(hangar);
+    registerCollider(87, 113, -126, -104, 'Airport Hangar');
+
+    const plane = new THREE.Group();
+    plane.position.set(125, 0, -115);
+    const pFuse = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.8, 0.8, 11, 10),
+      new THREE.MeshStandardMaterial({ color: 0xf8fafc })
+    );
+    pFuse.rotation.x = Math.PI / 2;
+    pFuse.position.y = 1.4;
+    const pWings = new THREE.Mesh(
+      new THREE.BoxGeometry(15, 0.15, 2.4),
+      new THREE.MeshStandardMaterial({ color: 0xdc2626 })
+    );
+    pWings.position.set(0, 1.5, 0);
+    const pTail = new THREE.Mesh(
+      new THREE.BoxGeometry(0.15, 2.2, 1.6),
+      new THREE.MeshStandardMaterial({ color: 0xdc2626 })
+    );
+    pTail.position.set(0, 2.2, -4.5);
+    plane.add(pFuse, pWings, pTail);
+    cityGroup.add(plane);
+    registerCollider(117, 133, -121, -109, 'Parked Airplane');
+
+    const heliPad = new THREE.Mesh(
+      new THREE.CylinderGeometry(6, 6, 0.1, 24),
+      new THREE.MeshStandardMaterial({ color: 0x334155 })
+    );
+    heliPad.position.set(125, 0.05, -50);
+    cityGroup.add(heliPad);
+    const hBarL = new THREE.Mesh(new THREE.PlaneGeometry(0.6, 4.0), stripeYellow);
+    hBarL.rotation.x = -Math.PI / 2;
+    hBarL.position.set(123.5, 0.06, -50);
+    const hBarR = hBarL.clone();
+    hBarR.position.x = 126.5;
+    const hBarMid = new THREE.Mesh(new THREE.PlaneGeometry(3.0, 0.6), stripeYellow);
+    hBarMid.rotation.x = -Math.PI / 2;
+    hBarMid.position.set(125, 0.06, -50);
+    cityGroup.add(hBarL, hBarR, hBarMid);
+
+    // D. PINE MOUNTAIN LOOKOUT & CAMPGROUNDS (North-West: X: -115, Z: -115)
+    for (let i = 0; i < 22; i++) {
+      const mx = -135 + (i % 6) * 10 + (Math.random() - 0.5) * 4;
+      const mz = -140 + Math.floor(i / 6) * 12 + (Math.random() - 0.5) * 4;
+      const pTrunk = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.2, 0.3, 2.8, 6),
+        new THREE.MeshStandardMaterial({ color: 0x451a03 })
+      );
+      pTrunk.position.set(mx, 1.4, mz);
+      const pCone = new THREE.Mesh(
+        new THREE.ConeGeometry(1.8, 4.5, 6),
+        new THREE.MeshStandardMaterial({ color: 0x14532d, roughness: 0.9 })
+      );
+      pCone.position.set(mx, 4.5, mz);
+      cityGroup.add(pTrunk, pCone);
+      registerCollider(mx - 0.4, mx + 0.4, mz - 0.4, mz + 0.4, 'Pine Tree');
+    }
+
+    const tentMat = new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.7 });
+    for (const [tx, tz] of [
+      [-110, -110],
+      [-120, -115],
+    ]) {
+      const tent = new THREE.Mesh(new THREE.ConeGeometry(2.2, 2.0, 4), tentMat);
+      tent.rotation.y = Math.PI / 4;
+      tent.position.set(tx, 1.0, tz);
+      cityGroup.add(tent);
+      registerCollider(tx - 1.2, tx + 1.2, tz - 1.2, tz + 1.2, 'Camp Tent');
+    }
+
+    const fireLight = new THREE.PointLight(0xf97316, 2.2, 14);
+    fireLight.position.set(-115, 0.8, -112);
+    cityGroup.add(fireLight);
+    campfireLightRef.current = fireLight;
+
+    const fireLogs = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.9, 1.0, 0.35, 8),
+      new THREE.MeshStandardMaterial({ color: 0x1c1917 })
+    );
+    fireLogs.position.set(-115, 0.15, -112);
+    fireLogs.userData = { isCampfire: true };
+    cityGroup.add(fireLogs);
+
+    const flameGroup = new THREE.Group();
+    flameGroup.position.set(-115, 0.35, -112);
+    for (let f = 0; f < 5; f++) {
+      const flameMesh = new THREE.Mesh(
+        new THREE.ConeGeometry(0.35, 0.9, 5),
+        new THREE.MeshBasicMaterial({ color: f % 2 === 0 ? 0xf97316 : 0xfacc15 })
+      );
+      flameMesh.position.set((Math.random() - 0.5) * 0.3, 0.35, (Math.random() - 0.5) * 0.3);
+      flameGroup.add(flameMesh);
+    }
+    cityGroup.add(flameGroup);
+    campfireFlamesRef.current = flameGroup;
+
+    const tower = new THREE.Group();
+    tower.position.set(-105, 0, -125);
+    for (const [lx, lz] of [
+      [-2, -2],
+      [2, -2],
+      [-2, 2],
+      [2, 2],
+    ]) {
+      const leg = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.18, 0.18, 8.5, 6),
+        new THREE.MeshStandardMaterial({ color: 0x78350f })
+      );
+      leg.position.set(lx, 4.25, lz);
+      tower.add(leg);
+    }
+    const deck = new THREE.Mesh(
+      new THREE.BoxGeometry(6.0, 0.4, 6.0),
+      new THREE.MeshStandardMaterial({ color: 0x92400e })
+    );
+    deck.position.y = 8.5;
+    const roof = new THREE.Mesh(
+      new THREE.ConeGeometry(4.8, 2.2, 4),
+      new THREE.MeshStandardMaterial({ color: 0x451a03 })
+    );
+    roof.rotation.y = Math.PI / 4;
+    roof.position.y = 11.0;
+    tower.add(deck, roof);
+
+    // Scenic Overlook Telescope on Tripod
+    const telescope = new THREE.Group();
+    telescope.position.set(0, 8.7, 2.4);
+    const tStand = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.12, 1.1, 6), new THREE.MeshStandardMaterial({ color: 0x475569 }));
+    tStand.position.y = 0.55;
+    const tTube = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.07, 1.0, 8), new THREE.MeshStandardMaterial({ color: 0xd97706, metalness: 0.8, roughness: 0.2 }));
+    tTube.rotation.x = Math.PI / 2 + 0.25;
+    tTube.position.set(0, 1.1, 0);
+    telescope.add(tStand, tTube);
+    telescope.userData = { isTelescope: true };
+    tower.add(telescope);
+
+    cityGroup.add(tower);
+    registerCollider(-108, -102, -128, -122, 'Lookout Tower');
+
+    // E. NORTHGATE MEGA SUPERMARKET (North: X: -35, Z: -80)
+    createWalkableBuilding('Northgate Supermarket & Mall', -35, -80, 20, 15, '#3b82f6', '#facc15', 'furniture');
+
+    // F. STARLIGHT DRIVE-IN CINEMA (South: X: 8.5, Z: 135)
+    const movieScreen = new THREE.Mesh(
+      new THREE.BoxGeometry(22, 11, 0.6),
+      new THREE.MeshBasicMaterial({ color: 0x0284c7 })
+    );
+    movieScreen.position.set(8.5, 6.5, 142);
+    cityGroup.add(movieScreen);
+    cinemaScreenMeshRef.current = movieScreen;
+    registerCollider(-3, 20, 141, 143, 'Drive-In Movie Screen');
+
+    // Drive-In Speaker Post & Channel Switcher
+    const speakerPost = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 1.3, 6), new THREE.MeshStandardMaterial({ color: 0x334155 }));
+    speakerPost.position.set(8.5, 0.65, 125);
+    const speakerBox = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.45, 0.35), new THREE.MeshStandardMaterial({ color: 0xf59e0b }));
+    speakerBox.position.set(8.5, 1.35, 125);
+    speakerBox.userData = { isCinemaSpeaker: true };
+    cityGroup.add(speakerPost, speakerBox);
 
     collidersRef.current = colliders;
 
@@ -731,6 +1379,51 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
     scene.add(carMeshGroup);
     activeCarGroupRef.current = carMeshGroup;
     carWheelsRef.current = carModelData.wheels;
+
+    // =========================================================================
+    // 6B. SPAWNED DRIVEABLE MARINA YACHT / SPEEDBOAT
+    // =========================================================================
+    const boatModelData = buildBoat3DModel();
+    const boatMeshGroup = boatModelData.group;
+    boatMeshGroup.position.set(boatPhysicsRef.current.x, 0.25, boatPhysicsRef.current.z);
+    boatMeshGroup.rotation.y = boatPhysicsRef.current.rotationY;
+    scene.add(boatMeshGroup);
+    activeBoatGroupRef.current = boatMeshGroup;
+    boatPropellersRef.current = boatModelData.propellers;
+    boatWakeGroupRef.current = boatModelData.wakeGroup;
+
+    // =========================================================================
+    // 6C. SPAWNED DRIVEABLE METRO HELICOPTER (Airport Helipad)
+    // =========================================================================
+    const heliModelData = buildHelicopter3DModel();
+    const heliMeshGroup = heliModelData.group;
+    heliMeshGroup.position.set(
+      helicopterPhysicsRef.current.x,
+      helicopterPhysicsRef.current.y,
+      helicopterPhysicsRef.current.z
+    );
+    heliMeshGroup.rotation.y = helicopterPhysicsRef.current.rotationY;
+    scene.add(heliMeshGroup);
+    activeHeliGroupRef.current = heliMeshGroup;
+    mainRotorRef.current = heliModelData.mainRotor;
+    tailRotorRef.current = heliModelData.tailRotor;
+    heliBeaconLightRef.current = heliModelData.beaconLight;
+
+    // Downwash dust/wind ring on ground under helicopter
+    const heliGroundRing = new THREE.Mesh(
+      new THREE.RingGeometry(2.0, 5.5, 32),
+      new THREE.MeshBasicMaterial({
+        color: 0x94a3b8,
+        transparent: true,
+        opacity: 0.35,
+        side: THREE.DoubleSide,
+      })
+    );
+    heliGroundRing.rotation.x = -Math.PI / 2;
+    heliGroundRing.position.set(125, 0.04, -50);
+    heliGroundRing.visible = false;
+    scene.add(heliGroundRing);
+    heliGroundRingRef.current = heliGroundRing;
 
     // Placed Items Group
     const placedGroup = new THREE.Group();
@@ -881,11 +1574,28 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
 
       // 'E' Key Interaction
       if (k === 'e' && !e.repeat) {
-        e.preventDefault();
         const cur = stateRef.current;
+        const curVehicle = cur.activeVehicle ?? (cur.isDrivingCar ? 'car' : null);
 
-        if (cur.isDrivingCar) {
-          cur.onExitCar();
+        // 1. If inside Car:
+        if (curVehicle === 'car') {
+          e.preventDefault();
+          // Check if parked near Gas Station pump to refuel!
+          const distToPump = Math.hypot(carPhysicsRef.current.x - 28, carPhysicsRef.current.z - 48);
+          if (distToPump < 7.5) {
+            if (cur.playerCash < 15) {
+              cur.onShowToast?.('❌ Not enough cash! Refueling costs $15.');
+              return;
+            }
+            cur.onBonusCash?.(-15, 'Gas Station Refuel');
+            cur.onFuelUpdate?.(100);
+            cur.onRefuelAtPump?.();
+            soundFX.playFuelPump();
+            cur.onShowToast?.('⛽ Tank filled to 100%! Ready to roll.');
+            return;
+          }
+
+          cur.onExitVehicle ? cur.onExitVehicle() : cur.onExitCar();
           playerGrp.position.set(
             carPhysicsRef.current.x + Math.sin(carPhysicsRef.current.rotationY + Math.PI / 2) * 2.2,
             0,
@@ -896,27 +1606,218 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
           return;
         }
 
-        // Check if near car to Enter
+        // 2. If inside Boat:
+        if (curVehicle === 'boat') {
+          e.preventDefault();
+          cur.onExitVehicle ? cur.onExitVehicle() : cur.onExitCar();
+          playerGrp.position.set(-126, 0.25, Math.min(130, Math.max(90, boatPhysicsRef.current.z)));
+          humanPosRef.current.copy(playerGrp.position);
+          soundFX.playWaterSplash();
+          return;
+        }
+
+        // 3. If inside Helicopter:
+        if (curVehicle === 'helicopter') {
+          // STRICT MIDAIR CHECK: Cannot leave helicopter midair!
+          if (helicopterPhysicsRef.current.y <= 0.6) {
+            e.preventDefault();
+            cur.onExitVehicle ? cur.onExitVehicle() : cur.onExitCar();
+            playerGrp.position.set(
+              helicopterPhysicsRef.current.x + 2.5,
+              0,
+              helicopterPhysicsRef.current.z
+            );
+            humanPosRef.current.copy(playerGrp.position);
+            soundFX.playCarEngineStart();
+            return;
+          } else {
+            e.preventDefault();
+            cur.onShowToast?.('🛬 Descending... Hold [E] until landed on the ground to exit.');
+            return;
+          }
+        }
+
+        // 4. On Foot: Check Interactive Objects in proximity
+
+        // A. Pour Gas Jug into Stalled Car Tank
         const carDist = humanPosRef.current.distanceTo(
           new THREE.Vector3(carPhysicsRef.current.x, 0, carPhysicsRef.current.z)
         );
-        if (carDist < 3.2) {
-          cur.onEnterCar();
+        if (carDist < 3.8 && cur.hasGasJug) {
+          e.preventDefault();
+          cur.onRefuelCarWithJug?.();
+          cur.onFuelUpdate?.(65);
+          soundFX.playGasPour();
+          cur.onShowToast?.('⛽ Poured Fuel Jug into tank (+65% Gas)! Ready to drive.');
+          return;
+        }
+
+        // B. Gas Station Pump (Buy Emergency Gas Jug on foot)
+        const gasStationDist = humanPosRef.current.distanceTo(new THREE.Vector3(28, 0, 48));
+        if (gasStationDist < 6.0) {
+          e.preventDefault();
+          if (cur.hasGasJug) {
+            cur.onShowToast?.('🛢️ Filled Gas Jug in hand! Walk back to your car to refuel.');
+            return;
+          }
+          if (cur.playerCash < 20) {
+            cur.onShowToast?.('❌ Not enough cash! Emergency Gas Jug costs $20.');
+            return;
+          }
+          cur.onBonusCash?.(-20, 'Emergency Gas Jug');
+          cur.onBuyGasJug?.();
+          soundFX.playFuelPump();
+          cur.onShowToast?.('🛢️ Emergency Fuel Jug purchased & filled! Walk to your car to refuel.');
+          return;
+        }
+
+        // C. Boat boarding (Marina Slip)
+        const boatDist = humanPosRef.current.distanceTo(
+          new THREE.Vector3(boatPhysicsRef.current.x, 0, boatPhysicsRef.current.z)
+        );
+        if (boatDist < 5.5) {
+          e.preventDefault();
+          cur.onEnterVehicle ? cur.onEnterVehicle('boat') : cur.onEnterCar();
+          soundFX.playBoatEngine();
+          soundFX.playWaterSplash();
+          return;
+        }
+
+        // D. Helicopter boarding (Airport Helipad)
+        const heliDist = humanPosRef.current.distanceTo(
+          new THREE.Vector3(helicopterPhysicsRef.current.x, 0, helicopterPhysicsRef.current.z)
+        );
+        if (heliDist < 4.5) {
+          e.preventDefault();
+          cur.onEnterVehicle ? cur.onEnterVehicle('helicopter') : cur.onEnterCar();
+          soundFX.playHelicopterThump();
+          return;
+        }
+
+        // E. Car boarding (Check fuel)
+        if (carDist < 3.4) {
+          e.preventDefault();
+          if (cur.carFuel !== undefined && cur.carFuel <= 0) {
+            soundFX.playEngineStall();
+            cur.onShowToast?.('⚠️ Car is OUT OF GAS! Walk to the Gas Station (East Road) to buy a Fuel Jug ($20).');
+            return;
+          }
+          cur.onEnterVehicle ? cur.onEnterVehicle('car') : cur.onEnterCar();
           soundFX.playCarEngineStart();
           return;
         }
 
-        // Check if near NPC
+        // D. Plaza Fountain (Coin Toss)
+        const fountainDist = humanPosRef.current.distanceTo(new THREE.Vector3(48, 0, 48));
+        if (fountainDist < 4.8) {
+          e.preventDefault();
+          soundFX.playCoinToss();
+          const bonus = Math.random() > 0.4 ? 25 : 15;
+          cur.onBonusCash?.(bonus, 'Fountain Wish');
+          cur.onShowToast?.(`🍀 You tossed a lucky coin into the fountain! Won +$${bonus}!`);
+
+          // Sparkle burst in 3D
+          if (fountainSparklesRef.current) {
+            for (let s = 0; s < 12; s++) {
+              const spMesh = new THREE.Mesh(
+                new THREE.DodecahedronGeometry(0.18, 0),
+                new THREE.MeshBasicMaterial({ color: s % 2 === 0 ? 0x38bdf8 : 0xfacc15 })
+              );
+              spMesh.position.set((Math.random() - 0.5) * 2, 0.2, (Math.random() - 0.5) * 2);
+              fountainSparklesRef.current.add(spMesh);
+              setTimeout(() => {
+                fountainSparklesRef.current?.remove(spMesh);
+              }, 1200);
+            }
+          }
+          return;
+        }
+
+        // E. Campfire
+        const campDist = humanPosRef.current.distanceTo(new THREE.Vector3(-115, 0, -112));
+        if (campDist < 4.0) {
+          e.preventDefault();
+          campfireActiveRef.current = !campfireActiveRef.current;
+          if (campfireFlamesRef.current) campfireFlamesRef.current.visible = campfireActiveRef.current;
+          if (campfireLightRef.current) campfireLightRef.current.intensity = campfireActiveRef.current ? 2.2 : 0;
+          soundFX.playPlaceObject();
+          cur.onShowToast?.(
+            campfireActiveRef.current
+              ? '🔥 Campfire rekindled! Glowing warm and cozy.'
+              : '🔥 Campfire embers banked.'
+          );
+          return;
+        }
+
+        // F. Mountain Lookout Telescope
+        const teleDist = humanPosRef.current.distanceTo(new THREE.Vector3(-105, 0, -125));
+        if (teleDist < 4.5) {
+          e.preventDefault();
+          telescopeActiveRef.current = !telescopeActiveRef.current;
+          soundFX.playInteractChime();
+          if (telescopeActiveRef.current) {
+            cameraPitchRef.current = 0.25;
+            cameraYawRef.current = Math.PI * 0.75;
+            cameraDistRef.current = 24.0;
+            cur.onShowToast?.('🔭 Looking through the Scenic Telescope! Panoramic view of the metropolis.');
+          } else {
+            cameraPitchRef.current = 0.65;
+            cameraYawRef.current = 0.0;
+            cameraDistRef.current = 11.0;
+          }
+          return;
+        }
+
+        // G. Drive-In Cinema Speaker
+        const cinemaDist = humanPosRef.current.distanceTo(new THREE.Vector3(8.5, 0, 125));
+        if (cinemaDist < 7.5) {
+          e.preventDefault();
+          cinemaChannelRef.current = (cinemaChannelRef.current + 1) % 4;
+          const channels = [
+            { name: 'NEON SUNSET HIGHWAY', color: 0xf43f5e },
+            { name: 'CYBER CITY 2099', color: 0x06b6d4 },
+            { name: 'GRAND PRIX NITRO', color: 0xeab308 },
+            { name: 'DEEP SPACE ODYSSEY', color: 0x8b5cf6 },
+          ];
+          const activeCh = channels[cinemaChannelRef.current];
+          if (cinemaScreenMeshRef.current) {
+            (cinemaScreenMeshRef.current.material as THREE.MeshBasicMaterial).color.setHex(activeCh.color);
+          }
+          soundFX.playInteractChime();
+          cur.onShowToast?.(`🎬 Drive-In Screen switched to: ${activeCh.name}`);
+          return;
+        }
+
+        // H. Boardwalk Smoothie Stand
+        const smoothieDist = humanPosRef.current.distanceTo(new THREE.Vector3(-110, 0, 92));
+        if (smoothieDist < 4.2) {
+          e.preventDefault();
+          soundFX.playWorkTask();
+          cur.onBonusCash?.(-8, 'Smoothie');
+          cur.onShowToast?.('🥥 Sipped an ice-cold Coconut Mango Smoothie! Feeling energized!');
+          return;
+        }
+
+        // I. Beach Lounger
+        const loungerDist = humanPosRef.current.distanceTo(new THREE.Vector3(-102, 0, 108));
+        if (loungerDist < 3.2) {
+          e.preventDefault();
+          soundFX.playInteractChime();
+          cur.onShowToast?.('🏖️ Resting under the beach umbrella listening to the ocean breeze...');
+          return;
+        }
+
+        // J. NPC Interaction
         for (const npc of npcMeshes) {
           const dist = humanPosRef.current.distanceTo(npc.group.position);
-          if (dist < 3.0) {
+          if (dist < 3.2) {
             cur.onInteractWithNPC(npc.data);
             soundFX.playInteractChime();
             return;
           }
         }
 
-        // Check if near Pet
+        // K. Pet Interaction
         for (const pet of cur.placedPets) {
           const petVec = new THREE.Vector3(pet.position[0], pet.position[1], pet.position[2]);
           if (humanPosRef.current.distanceTo(petVec) < 2.5) {
@@ -926,7 +1827,7 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
           }
         }
 
-        // Check if near Shop entrance or interior counter
+        // L. Shop Entrance
         for (const bldg of cityGroup.children) {
           if (bldg.userData?.isShop) {
             const dist = humanPosRef.current.distanceTo(bldg.position);
@@ -940,6 +1841,28 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
               return;
             }
           }
+        }
+      }
+
+      // 'F' Key: Emergency Helicopter Disembark / Landing Key
+      if (k === 'f' && !e.repeat) {
+        const cur = stateRef.current;
+        const curVehicle = cur.activeVehicle ?? (cur.isDrivingCar ? 'car' : null);
+        if (curVehicle === 'helicopter') {
+          e.preventDefault();
+          if (helicopterPhysicsRef.current.y > 0.6) {
+            cur.onShowToast?.('⚠️ Cannot exit helicopter mid-air! Hold [E] to land safely first.');
+            return;
+          }
+          cur.onExitVehicle ? cur.onExitVehicle() : cur.onExitCar();
+          playerGrp.position.set(
+            helicopterPhysicsRef.current.x + 2.5,
+            0,
+            helicopterPhysicsRef.current.z
+          );
+          humanPosRef.current.copy(playerGrp.position);
+          soundFX.playCarEngineStart();
+          return;
         }
       }
 
@@ -973,6 +1896,7 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
 
       // Handle item placement raycasting
       const activeItem = stateRef.current.activePlacingItem;
+      const ghostGroup = ghostMeshRef.current;
       if (!activeItem || !ghostGroup) return;
 
       const rect = renderer.domElement.getBoundingClientRect();
@@ -995,22 +1919,42 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
           }
           setPlacementError(null);
         } else {
-          setPlacementError('This item can ONLY be mounted on an interior wall!');
+          // If hovering over ground or other surface, show helpful reminder
+          const groundHits = raycaster.intersectObjects(
+            [...floorMeshesRef.current, ...backyardMeshesRef.current, groundMeshRef.current].filter(Boolean) as THREE.Object3D[],
+            false
+          );
+          if (groundHits.length > 0) {
+            ghostGroup.visible = true;
+            ghostGroup.position.set(groundHits[0].point.x, 0.05, groundHits[0].point.z);
+            setPlacementError('Point cursor at an interior wall to mount this wall item!');
+          }
         }
       } else if (activeItem.placementType === 'backyard_only') {
-        const yardHits = raycaster.intersectObjects(backyardMeshesRef.current, false);
-        if (yardHits.length > 0) {
-          const hit = yardHits[0];
+        const targets = [
+          ...backyardMeshesRef.current,
+          ...floorMeshesRef.current,
+          drivewayRef.current,
+          groundMeshRef.current,
+        ].filter(Boolean) as THREE.Object3D[];
+        const hits = raycaster.intersectObjects(targets, false);
+        if (hits.length > 0) {
+          const hit = hits[0];
           ghostGroup.visible = true;
           ghostGroup.position.set(hit.point.x, 0.05, hit.point.z);
           setPlacementError(null);
-        } else {
-          setPlacementError('This item must be placed outside in your backyard!');
         }
       } else {
-        const floorHits = raycaster.intersectObjects([...floorMeshesRef.current, ...backyardMeshesRef.current], false);
-        if (floorHits.length > 0) {
-          const hit = floorHits[0];
+        // Floor, Furniture, Electronics, Everyday, Outdoor items
+        const targets = [
+          ...floorMeshesRef.current,
+          ...backyardMeshesRef.current,
+          drivewayRef.current,
+          groundMeshRef.current,
+        ].filter(Boolean) as THREE.Object3D[];
+        const hits = raycaster.intersectObjects(targets, false);
+        if (hits.length > 0) {
+          const hit = hits[0];
           ghostGroup.visible = true;
           ghostGroup.position.set(hit.point.x, 0.05, hit.point.z);
           setPlacementError(null);
@@ -1043,20 +1987,31 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
           const rotY = Math.atan2(normal[0], normal[2]);
           stateRef.current.onPlaceItem(activeItem, [hit.point.x, 1.6, hit.point.z], rotY, true, normal as [number, number, number]);
           soundFX.playPlaceObject();
-        }
-      } else if (activeItem.placementType === 'backyard_only') {
-        const yardHits = raycaster.intersectObjects(backyardMeshesRef.current, false);
-        if (yardHits.length > 0) {
-          const hit = yardHits[0];
-          stateRef.current.onPlaceItem(activeItem, [hit.point.x, 0.05, hit.point.z], 0, false);
-          soundFX.playPlaceObject();
+          stateRef.current.onShowToast?.(`🖼️ Mounted ${activeItem.name} onto wall!`);
+        } else {
+          stateRef.current.onShowToast?.('⚠️ Please click directly on an interior house wall to mount this item.');
         }
       } else {
-        const floorHits = raycaster.intersectObjects([...floorMeshesRef.current, ...backyardMeshesRef.current], false);
-        if (floorHits.length > 0) {
-          const hit = floorHits[0];
+        // Floor, Backyard, Outdoor, Everyday items
+        const targets = [
+          ...floorMeshesRef.current,
+          ...backyardMeshesRef.current,
+          drivewayRef.current,
+          groundMeshRef.current,
+        ].filter(Boolean) as THREE.Object3D[];
+        const hits = raycaster.intersectObjects(targets, false);
+        if (hits.length > 0) {
+          const hit = hits[0];
           stateRef.current.onPlaceItem(activeItem, [hit.point.x, 0.05, hit.point.z], 0, false);
           soundFX.playPlaceObject();
+          stateRef.current.onShowToast?.(`🛋️ Placed ${activeItem.name} in your home!`);
+        } else {
+          // Fallback to player's current position if raycast missed
+          const px = humanPosRef.current.x;
+          const pz = humanPosRef.current.z;
+          stateRef.current.onPlaceItem(activeItem, [px, 0.05, pz], 0, false);
+          soundFX.playPlaceObject();
+          stateRef.current.onShowToast?.(`🛋️ Placed ${activeItem.name} at your feet!`);
         }
       }
     };
@@ -1080,6 +2035,7 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
     let animId = 0;
     const clock = new THREE.Clock();
     let walkPhase = 0;
+    let saveTimer = 0;
 
     // Fast Axis-Aligned Bounding Box Collision Check
     const checkCollision = (cx: number, cz: number, radius: number): boolean => {
@@ -1100,9 +2056,206 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
       animId = requestAnimationFrame(animate);
       const dt = Math.min(clock.getDelta(), 0.1);
       const cur = stateRef.current;
+      const curVehicle = cur.activeVehicle ?? (cur.isDrivingCar ? 'car' : null);
 
-      // 1. DRIVING CAR SIMULATION WITH SOLID COLLISION
-      if (cur.isDrivingCar) {
+      // =======================================================================
+      // 1A. DRIVEABLE HELICOPTER SIMULATION (q=up, e=down/landing, w/s pitch, a/d yaw)
+      // =======================================================================
+      if (curVehicle === 'helicopter') {
+        playerGrp.visible = false;
+        const heliPhys = helicopterPhysicsRef.current;
+
+        // Up & Down Controls:
+        // Q = Up (Ascend)
+        // E = Down (Descend, and landing)
+        if (keys.has('q')) {
+          heliPhys.verticalSpeed = Math.min(16.0, heliPhys.verticalSpeed + 22.0 * dt);
+        } else if (keys.has('e')) {
+          heliPhys.verticalSpeed = Math.max(-14.0, heliPhys.verticalSpeed - 22.0 * dt);
+        } else {
+          heliPhys.verticalSpeed *= 0.94; // Soft hovering auto-damp
+        }
+
+        // Directional Pitch & Forward/Backward (W / S)
+        if (keys.has('w') || keys.has('arrowup')) {
+          heliPhys.speed = Math.min(45.0, heliPhys.speed + 25.0 * dt);
+          heliPhys.tiltPitch = THREE.MathUtils.lerp(heliPhys.tiltPitch, 0.22, 0.1);
+        } else if (keys.has('s') || keys.has('arrowdown')) {
+          heliPhys.speed = Math.max(-18.0, heliPhys.speed - 22.0 * dt);
+          heliPhys.tiltPitch = THREE.MathUtils.lerp(heliPhys.tiltPitch, -0.18, 0.1);
+        } else {
+          heliPhys.speed *= 0.96;
+          heliPhys.tiltPitch = THREE.MathUtils.lerp(heliPhys.tiltPitch, 0, 0.08);
+        }
+
+        // Directional Yaw & Roll (A / D)
+        if (keys.has('a') || keys.has('arrowleft')) {
+          heliPhys.rotationY += 2.4 * dt;
+          heliPhys.tiltRoll = THREE.MathUtils.lerp(heliPhys.tiltRoll, -0.18, 0.12);
+        } else if (keys.has('d') || keys.has('arrowright')) {
+          heliPhys.rotationY -= 2.4 * dt;
+          heliPhys.tiltRoll = THREE.MathUtils.lerp(heliPhys.tiltRoll, 0.18, 0.12);
+        } else {
+          heliPhys.tiltRoll = THREE.MathUtils.lerp(heliPhys.tiltRoll, 0, 0.08);
+        }
+
+        // Apply Vertical Altitude & Landing on Ground/Helipad
+        heliPhys.y = Math.max(0.18, Math.min(135.0, heliPhys.y + heliPhys.verticalSpeed * dt));
+        if (heliPhys.y <= 0.19) {
+          heliPhys.y = 0.18;
+          heliPhys.verticalSpeed = 0;
+        }
+
+        // Apply Horizontal Flight Movement
+        heliPhys.x += Math.sin(heliPhys.rotationY) * heliPhys.speed * dt;
+        heliPhys.z += Math.cos(heliPhys.rotationY) * heliPhys.speed * dt;
+
+        // Clamp to open map boundaries
+        heliPhys.x = Math.max(-235, Math.min(235, heliPhys.x));
+        heliPhys.z = Math.max(-235, Math.min(235, heliPhys.z));
+
+        // Update 3D Helicopter Group Position and Tilt
+        if (activeHeliGroupRef.current) {
+          activeHeliGroupRef.current.position.set(heliPhys.x, heliPhys.y, heliPhys.z);
+          activeHeliGroupRef.current.rotation.set(heliPhys.tiltPitch, heliPhys.rotationY, heliPhys.tiltRoll);
+        }
+
+        // Spin Main Rotor and Tail Rotor
+        if (mainRotorRef.current) mainRotorRef.current.rotation.y += 44.0 * dt;
+        if (tailRotorRef.current) tailRotorRef.current.rotation.x += 52.0 * dt;
+
+        // Flashing Anti-Collision Beacon
+        if (heliBeaconLightRef.current) {
+          heliBeaconLightRef.current.intensity = Math.sin(clock.getElapsedTime() * 9) > 0.35 ? 2.5 : 0;
+        }
+
+        // Ground Downwash Dust/Wind Ring
+        if (heliGroundRingRef.current) {
+          if (heliPhys.y < 16.0) {
+            heliGroundRingRef.current.visible = true;
+            heliGroundRingRef.current.position.set(heliPhys.x, 0.04, heliPhys.z);
+            const scale = Math.max(1.0, heliPhys.y * 0.75);
+            heliGroundRingRef.current.scale.set(scale, scale, 1);
+            (heliGroundRingRef.current.material as THREE.MeshBasicMaterial).opacity =
+              Math.max(0.05, 0.45 * (1 - heliPhys.y / 16.0));
+          } else {
+            heliGroundRingRef.current.visible = false;
+          }
+        }
+
+        // Periodic Chopper Blade Thumping Audio
+        if (Math.random() < 0.18) {
+          soundFX.playHelicopterThump();
+        }
+
+        cur.onSpeedUpdate(Math.round(Math.abs(heliPhys.speed)));
+        cur.onAltitudeUpdate?.(Math.round(heliPhys.y));
+
+        // Follow Camera in 3D
+        const yaw = cameraYawRef.current + heliPhys.rotationY;
+        const pitch = cameraPitchRef.current;
+        const dist = Math.max(9.5, cameraDistRef.current + Math.min(14, heliPhys.y * 0.15));
+
+        const camTarget = new THREE.Vector3(heliPhys.x, heliPhys.y + 1.2, heliPhys.z);
+        const camOffset = new THREE.Vector3(
+          heliPhys.x - Math.sin(yaw) * Math.cos(pitch) * dist,
+          heliPhys.y + Math.sin(pitch) * dist + 1.4,
+          heliPhys.z - Math.cos(yaw) * Math.cos(pitch) * dist
+        );
+        camera.position.lerp(camOffset, 0.12);
+        camera.lookAt(camTarget);
+
+      // =======================================================================
+      // 1B. DRIVEABLE MARINA YACHT / SPEEDBOAT SIMULATION
+      // =======================================================================
+      } else if (curVehicle === 'boat') {
+        playerGrp.visible = false;
+        const boatPhys = boatPhysicsRef.current;
+
+        // Boat Throttle & Steering Controls
+        if (keys.has('w') || keys.has('arrowup')) {
+          boatPhys.speed = Math.min(32.0, boatPhys.speed + 18.0 * dt);
+        } else if (keys.has('s') || keys.has('arrowdown')) {
+          boatPhys.speed = Math.max(-12.0, boatPhys.speed - 14.0 * dt);
+        } else {
+          boatPhys.speed *= 0.965; // Water hydrodynamic drag
+        }
+
+        const maxRudder = 0.85;
+        const rudderSpeed = 3.2;
+        if (keys.has('a') || keys.has('arrowleft')) {
+          boatPhys.steering = Math.max(-maxRudder, boatPhys.steering - rudderSpeed * dt);
+        } else if (keys.has('d') || keys.has('arrowright')) {
+          boatPhys.steering = Math.min(maxRudder, boatPhys.steering + rudderSpeed * dt);
+        } else {
+          boatPhys.steering *= 0.8;
+        }
+
+        if (Math.abs(boatPhys.speed) > 0.15) {
+          boatPhys.rotationY -= boatPhys.steering * Math.sign(boatPhys.speed) * 2.8 * dt;
+        }
+
+        const nextBoatX = boatPhys.x + Math.sin(boatPhys.rotationY) * boatPhys.speed * dt;
+        const nextBoatZ = boatPhys.z + Math.cos(boatPhys.rotationY) * boatPhys.speed * dt;
+
+        // Water Boundaries: Ocean & Coastal Marina
+        // If hitting shoreline / pier, gently cushion bounce
+        if (nextBoatX > -122) {
+          boatPhys.speed = -boatPhys.speed * 0.3;
+          boatPhys.x = -122.5;
+        } else {
+          boatPhys.x = Math.max(-235, Math.min(-122, nextBoatX));
+        }
+        boatPhys.z = Math.max(15, Math.min(210, nextBoatZ));
+
+        // Rhythmic water wave bobbing & hull banking into turn
+        const waveBob = Math.sin(clock.getElapsedTime() * 2.8) * 0.06;
+        const bankRoll = -boatPhys.steering * (boatPhys.speed / 32) * 0.22 + Math.cos(clock.getElapsedTime() * 1.6) * 0.02;
+
+        if (activeBoatGroupRef.current) {
+          activeBoatGroupRef.current.position.set(boatPhys.x, 0.25 + waveBob, boatPhys.z);
+          activeBoatGroupRef.current.rotation.set(0.04 * (boatPhys.speed / 30), boatPhys.rotationY, bankRoll);
+        }
+
+        // Spin dual outboard propellers
+        boatPropellersRef.current.forEach((prop) => {
+          prop.rotation.z += (boatPhys.speed / 0.15) * dt;
+        });
+
+        // Water Wake trailing behind boat
+        if (boatWakeGroupRef.current) {
+          const isMoving = Math.abs(boatPhys.speed) > 1.2;
+          boatWakeGroupRef.current.visible = isMoving;
+          if (isMoving) {
+            const scaleZ = 1.0 + Math.abs(boatPhys.speed) * 0.08;
+            boatWakeGroupRef.current.scale.set(1.0 + Math.abs(boatPhys.speed) * 0.03, 1, scaleZ);
+          }
+        }
+
+        if (Math.abs(boatPhys.speed) > 2.0 && Math.random() < 0.12) {
+          soundFX.playBoatEngine();
+        }
+
+        cur.onSpeedUpdate(Math.round(Math.abs(boatPhys.speed)));
+
+        // Camera Follows Boat
+        const yaw = cameraYawRef.current + boatPhys.rotationY;
+        const pitch = cameraPitchRef.current;
+        const dist = cameraDistRef.current + 2.0;
+
+        const camTarget = new THREE.Vector3(boatPhys.x, 1.4, boatPhys.z);
+        const camOffset = new THREE.Vector3(
+          boatPhys.x - Math.sin(yaw) * Math.cos(pitch) * dist,
+          Math.sin(pitch) * dist + 1.5,
+          boatPhys.z - Math.cos(yaw) * Math.cos(pitch) * dist
+        );
+        camera.position.lerp(camOffset, 0.12);
+        camera.lookAt(camTarget);
+
+      // =======================================================================
+      // 1C. DRIVING CAR SIMULATION WITH SOLID COLLISION
+      // =======================================================================
+      } else if (curVehicle === 'car') {
         playerGrp.visible = false;
         const carPhys = carPhysicsRef.current;
 
@@ -1194,25 +2347,49 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
         const accelRate = activeCar.acceleration * 14;
         const maxSpd = activeCar.maxSpeed;
 
-        if (keys.has('w') || keys.has('arrowup')) {
-          carPhys.speed = Math.min(maxSpd, carPhys.speed + accelRate * dt);
-        } else if (keys.has('s') || keys.has('arrowdown')) {
-          carPhys.speed = Math.max(-maxSpd * 0.4, carPhys.speed - accelRate * 1.5 * dt);
-        } else {
-          carPhys.speed *= 0.96;
+        // --- FUEL DRAINAGE WHILE DRIVING ---
+        if (cur.carFuel !== undefined) {
+          if (Math.abs(carPhys.speed) > 0.4) {
+            const drainRate = 0.55 + (Math.abs(carPhys.speed) / maxSpd) * 0.75;
+            const newFuel = Math.max(0, cur.carFuel - drainRate * dt);
+            if (Math.abs(newFuel - cur.carFuel) > 0.05 || newFuel === 0) {
+              cur.onFuelUpdate?.(newFuel);
+            }
+            if (newFuel <= 0 && cur.carFuel > 0) {
+              soundFX.playEngineStall();
+              cur.onShowToast?.('⚠️ OUT OF GAS! Car has stalled. Walk to the Gas Station (East Road) for an Emergency Gas Jug ($20).');
+            }
+          }
         }
 
-        const steerSpeed = activeCar.handling * 2.2;
-        if (keys.has('a') || keys.has('arrowleft')) {
-          carPhys.steering = Math.max(-0.55, carPhys.steering - steerSpeed * dt);
-        } else if (keys.has('d') || keys.has('arrowright')) {
-          carPhys.steering = Math.min(0.55, carPhys.steering + steerSpeed * dt);
+        // Acceleration & Braking (Disabled when Out of Gas!)
+        if (cur.carFuel !== undefined && cur.carFuel <= 0) {
+          carPhys.speed = THREE.MathUtils.lerp(carPhys.speed, 0, 0.08);
         } else {
-          carPhys.steering *= 0.8;
+          if (keys.has('w') || keys.has('arrowup')) {
+            carPhys.speed = Math.min(maxSpd, carPhys.speed + accelRate * dt);
+          } else if (keys.has('s') || keys.has('arrowdown')) {
+            carPhys.speed = Math.max(-maxSpd * 0.4, carPhys.speed - accelRate * 1.5 * dt);
+          } else {
+            carPhys.speed *= 0.96;
+          }
+        }
+
+        // --- SMOOTH & REALISTIC PROGRESSIVE STEERING (Significantly less sharp) ---
+        const maxSteer = 0.52;
+        const steerSpeed = activeCar.handling * 1.85;
+        if (keys.has('a') || keys.has('arrowleft')) {
+          carPhys.steering = Math.max(-maxSteer, carPhys.steering - steerSpeed * dt);
+        } else if (keys.has('d') || keys.has('arrowright')) {
+          carPhys.steering = Math.min(maxSteer, carPhys.steering + steerSpeed * dt);
+        } else {
+          carPhys.steering *= 0.86;
         }
 
         if (Math.abs(carPhys.speed) > 0.1) {
-          carPhys.rotationY -= carPhys.steering * (carPhys.speed / maxSpd) * 2.5 * dt;
+          // Smooth progressive angular rotation speed scaled comfortably by vehicle velocity
+          const speedFactor = Math.min(1.0, Math.max(0.32, Math.abs(carPhys.speed) / 7.2));
+          carPhys.rotationY -= carPhys.steering * Math.sign(carPhys.speed) * speedFactor * 1.65 * dt;
         }
 
         // Test Candidate Car Position against Building/Wall Colliders
@@ -1249,8 +2426,9 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
             carPhys.speed = -carPhys.speed * 0.35;
           }
         } else {
-          carPhys.x = Math.max(-55, Math.min(75, nextCarX));
-          carPhys.z = Math.max(-85, Math.min(85, nextCarZ));
+          // Expanded 500m Open-World Driving Boundaries
+          carPhys.x = Math.max(-175, Math.min(185, nextCarX));
+          carPhys.z = Math.max(-185, Math.min(185, nextCarZ));
         }
 
         carMeshGroup.position.set(carPhys.x, 0, carPhys.z);
@@ -1259,7 +2437,7 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
         const wheelRoll = (carPhys.speed / 0.35) * dt;
         carWheelsRef.current.forEach((w, idx) => {
           w.rotation.x += wheelRoll;
-          if (idx < 2) w.rotation.y = -carPhys.steering * 0.8;
+          if (idx < 2) w.rotation.y = -carPhys.steering * 0.7;
         });
 
         cur.onSpeedUpdate(Math.round(Math.abs(carPhys.speed)));
@@ -1375,11 +2553,102 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
           camTarget.y + Math.sin(effectivePitch) * effectiveDist,
           playerGrp.position.z - Math.cos(yaw) * Math.cos(effectivePitch) * effectiveDist
         );
+        // Check proximity for on-foot HUD prompts
+        const hPos = humanPosRef.current;
+        const distToBoat = hPos.distanceTo(new THREE.Vector3(boatPhysicsRef.current.x, 0, boatPhysicsRef.current.z));
+        const distToHeli = hPos.distanceTo(new THREE.Vector3(helicopterPhysicsRef.current.x, 0, helicopterPhysicsRef.current.z));
+        const distToCar = hPos.distanceTo(new THREE.Vector3(carPhysicsRef.current.x, 0, carPhysicsRef.current.z));
+        const distToGasStation = hPos.distanceTo(new THREE.Vector3(28, 0, 48));
+        const distToFountain = hPos.distanceTo(new THREE.Vector3(48, 0, 48));
+        const distToCamp = hPos.distanceTo(new THREE.Vector3(-115, 0, -112));
+        const distToCinema = hPos.distanceTo(new THREE.Vector3(8.5, 0, 125));
+        const distToSmoothie = hPos.distanceTo(new THREE.Vector3(-110, 0, 92));
+        const distToTele = hPos.distanceTo(new THREE.Vector3(-105, 0, -125));
+
+        if (distToCar < 3.8 && cur.hasGasJug) {
+          setNearbyPrompt({ text: 'Press [E] to Pour Gas Jug into Car Tank', icon: '⛽', actionId: 'refuel_jug' });
+        } else if (distToCar < 3.4 && cur.carFuel !== undefined && cur.carFuel <= 0) {
+          setNearbyPrompt({ text: '⚠️ Car is OUT OF GAS! Walk to Gas Station for Fuel Jug', icon: '🛢️', actionId: 'out_of_gas' });
+        } else if (distToGasStation < 6.0) {
+          if (cur.hasGasJug) {
+            setNearbyPrompt({ text: '🛢️ Filled Gas Jug in hand (Walk back to Car)', icon: '⛽', actionId: 'have_jug' });
+          } else {
+            setNearbyPrompt({ text: 'Press [E] to Buy Emergency Fuel Jug ($20)', icon: '🛢️', actionId: 'buy_jug' });
+          }
+        } else if (distToBoat < 5.5) {
+          setNearbyPrompt({ text: 'Press [E] to Board & Drive Yacht', icon: '⛵', actionId: 'boat' });
+        } else if (distToHeli < 4.5) {
+          setNearbyPrompt({ text: 'Press [E] to Board & Pilot Helicopter', icon: '🚁', actionId: 'heli' });
+        } else if (distToCar < 3.4) {
+          setNearbyPrompt({ text: 'Press [E] to Enter Car', icon: '🚗', actionId: 'car' });
+        } else if (distToFountain < 4.8) {
+          setNearbyPrompt({ text: 'Press [E] to Toss Coin in Fountain ($1)', icon: '🪙', actionId: 'fountain' });
+        } else if (distToCamp < 4.0) {
+          setNearbyPrompt({ text: 'Press [E] to Tend / Toggle Campfire', icon: '🔥', actionId: 'camp' });
+        } else if (distToCinema < 7.5) {
+          setNearbyPrompt({ text: 'Press [E] to Switch Cinema Movie', icon: '🎬', actionId: 'cinema' });
+        } else if (distToSmoothie < 4.2) {
+          setNearbyPrompt({ text: 'Press [E] to Buy Coconut Smoothie ($8)', icon: '🥥', actionId: 'smoothie' });
+        } else if (distToTele < 4.5) {
+          setNearbyPrompt({ text: 'Press [E] to Look through Scenic Telescope', icon: '🔭', actionId: 'telescope' });
+        } else {
+          setNearbyPrompt(null);
+        }
+
         camera.position.lerp(camPos, 0.1);
         camera.lookAt(camTarget);
       }
 
-      // 3. SCRIPTED AIMLESS WALKING NPCS
+      // =======================================================================
+      // 3. INTERACTIVE CITY DYNAMICS & EVENTS
+      // =======================================================================
+      // A. Campfire animation
+      if (campfireFlamesRef.current && campfireActiveRef.current) {
+        campfireFlamesRef.current.children.forEach((c, idx) => {
+          c.scale.y = 0.8 + Math.sin(clock.getElapsedTime() * 7 + idx * 1.5) * 0.35;
+        });
+      }
+
+      // B. Cinema Movie Screen pulse
+      if (cinemaScreenMeshRef.current) {
+        (cinemaScreenMeshRef.current.material as THREE.MeshBasicMaterial).opacity =
+          0.85 + Math.sin(clock.getElapsedTime() * 2.5) * 0.15;
+      }
+
+      // C. Speedway Stunt Ramp Detection
+      if (curVehicle === 'car' && stuntJumpCooldownRef.current <= 0) {
+        const distToRamp = Math.hypot(carPhysicsRef.current.x - 125, carPhysicsRef.current.z - 35);
+        if (distToRamp < 6.0 && Math.abs(carPhysicsRef.current.speed) > 18) {
+          stuntJumpCooldownRef.current = 5.0;
+          soundFX.playSpeedRadar();
+          cur.onBonusCash?.(35, 'Stunt Airtime');
+          cur.onShowToast?.('🚀 SPEEDWAY STUNT AIRTIME! Ramp jumped! +$35 Cash Bonus!');
+        }
+      }
+      if (stuntJumpCooldownRef.current > 0) stuntJumpCooldownRef.current -= dt;
+
+      // D. Speed Trap Radar Detection
+      if (speedTrapCooldownRef.current <= 0) {
+        const vPos =
+          curVehicle === 'helicopter'
+            ? helicopterPhysicsRef.current
+            : curVehicle === 'boat'
+            ? boatPhysicsRef.current
+            : curVehicle === 'car'
+            ? carPhysicsRef.current
+            : null;
+        if (vPos && Math.abs(vPos.speed) > 25) {
+          const distToRadar = Math.hypot(vPos.x - 115, vPos.z - 35);
+          if (distToRadar < 14) {
+            speedTrapCooldownRef.current = 6.0;
+            soundFX.playSpeedRadar();
+            cur.onShowToast?.(`🚨 SPEED RADAR: ${Math.round(Math.abs(vPos.speed))} MPH recorded! Nice speed!`);
+          }
+        }
+      }
+      if (speedTrapCooldownRef.current > 0) speedTrapCooldownRef.current -= dt;
+
+      // 4. SCRIPTED AIMLESS WALKING NPCS
       npcMeshes.forEach((npcObj) => {
         const data = npcObj.data;
         const targetWp = data.waypoints[data.currentWaypointIdx];
@@ -1400,6 +2669,23 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
           npcObj.legR.rotation.x = -swing;
         }
       });
+
+      // Periodically auto-save player & vehicle positions
+      saveTimer += dt;
+      if (saveTimer >= 2.5) {
+        saveTimer = 0;
+        stateRef.current.onSavePositions?.(
+          [humanPosRef.current.x, 0, humanPosRef.current.z],
+          { x: carPhysicsRef.current.x, z: carPhysicsRef.current.z, rotationY: carPhysicsRef.current.rotationY },
+          { x: boatPhysicsRef.current.x, z: boatPhysicsRef.current.z, rotationY: boatPhysicsRef.current.rotationY },
+          {
+            x: helicopterPhysicsRef.current.x,
+            y: helicopterPhysicsRef.current.y,
+            z: helicopterPhysicsRef.current.z,
+            rotationY: helicopterPhysicsRef.current.rotationY,
+          }
+        );
+      }
 
       renderer.render(scene, camera);
     };
@@ -1448,15 +2734,37 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
         </div>
       )}
 
+      {/* Interactive Proximity Action Prompt */}
+      {nearbyPrompt && !stateRef.current.activeVehicle && !stateRef.current.isDrivingCar && (
+        <div className="pointer-events-none absolute bottom-24 left-1/2 -translate-x-1/2 z-30 px-5 py-2.5 bg-slate-950/90 backdrop-blur-md border border-amber-400/60 rounded-2xl shadow-2xl flex items-center gap-3 animate-pulse">
+          <span className="text-xl">{nearbyPrompt.icon}</span>
+          <span className="text-xs font-bold text-amber-300 tracking-wide font-display">
+            {nearbyPrompt.text}
+          </span>
+        </div>
+      )}
+
       {/* Placing Item Guide Banner */}
       {activePlacingItem && (
-        <div className="pointer-events-auto absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-3 bg-amber-500 text-slate-950 px-4 py-2 rounded-xl font-semibold text-xs shadow-xl">
+        <div className="pointer-events-auto absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-3 bg-amber-500 text-slate-950 px-4 py-2.5 rounded-2xl font-bold text-xs shadow-2xl border border-white/20">
           <span>
-            Placing: <strong>{activePlacingItem.name}</strong> ({activePlacingItem.placementType === 'wall_only' ? 'Point on an Interior Wall' : activePlacingItem.placementType === 'backyard_only' ? 'Point in the Backyard' : 'Click to Place'})
+            Placing: <strong>{activePlacingItem.name}</strong> ({activePlacingItem.placementType === 'wall_only' ? 'Point on an Interior Wall' : 'Click Ground or Button'})
           </span>
           <button
+            onClick={() => {
+              const px = humanPosRef.current.x;
+              const pz = humanPosRef.current.z;
+              onPlaceItem(activePlacingItem, [px, 0.05, pz], 0, false);
+              soundFX.playPlaceObject();
+              onShowToast?.(`🛋️ Placed ${activePlacingItem.name} at your feet!`);
+            }}
+            className="px-3 py-1 rounded-xl bg-slate-950 hover:bg-slate-800 text-emerald-400 text-xs font-black shadow-md transition-transform hover:scale-105"
+          >
+            Place at Feet 📍
+          </button>
+          <button
             onClick={onCancelPlacing}
-            className="px-2 py-0.5 rounded bg-slate-950 text-white text-xs font-bold"
+            className="px-2.5 py-1 rounded-xl bg-slate-950/70 hover:bg-slate-950 text-white text-xs font-semibold"
           >
             Cancel
           </button>

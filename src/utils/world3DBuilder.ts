@@ -562,3 +562,285 @@ export function buildPet3DModel(pet: PetItem): THREE.Group {
 
   return group;
 }
+
+/**
+ * Procedural 3D Mesh Generator for the Driveable Marina Yacht / Speedboat
+ */
+export function buildBoat3DModel(): {
+  group: THREE.Group;
+  propellers: THREE.Mesh[];
+  wakeGroup: THREE.Group;
+} {
+  const group = new THREE.Group();
+  const whiteHull = getStandardMat('#f8fafc', 0.2, 0.05);
+  const blueTrim = getStandardMat('#0284c7', 0.3, 0.2);
+  const darkNavy = getStandardMat('#0f172a', 0.5, 0.3);
+  const teakWood = getStandardMat('#92400e', 0.7, 0.05);
+  const chromeMat = getStandardMat('#e2e8f0', 0.1, 0.85);
+  const glassMat = new THREE.MeshPhysicalMaterial({
+    color: 0x38bdf8,
+    transparent: true,
+    opacity: 0.65,
+    roughness: 0.1,
+    transmission: 0.8,
+  });
+
+  // Main V-Hull: sharp bow at +Z, wider at middle, flat transom at -Z
+  const hullGroup = new THREE.Group();
+
+  // Bottom keel
+  const keel = new THREE.Mesh(new THREE.BoxGeometry(4.2, 1.2, 14), blueTrim);
+  keel.position.y = 0.6;
+  hullGroup.add(keel);
+
+  // Bow wedge (tapered front)
+  const bowWedge = new THREE.Mesh(new THREE.ConeGeometry(2.8, 4.5, 4), whiteHull);
+  bowWedge.rotation.x = -Math.PI / 2;
+  bowWedge.rotation.y = Math.PI / 4;
+  bowWedge.position.set(0, 0.9, 8.5);
+  hullGroup.add(bowWedge);
+
+  // Main upper deck & sides
+  const deckHull = new THREE.Mesh(new THREE.BoxGeometry(5.2, 1.4, 12), whiteHull);
+  deckHull.position.set(0, 1.3, 1.0);
+  hullGroup.add(deckHull);
+
+  // Teak floor deck
+  const teakFloor = new THREE.Mesh(new THREE.PlaneGeometry(4.6, 11), teakWood);
+  teakFloor.rotation.x = -Math.PI / 2;
+  teakFloor.position.set(0, 2.02, 1.0);
+  hullGroup.add(teakFloor);
+
+  // Windshield
+  const windshield = new THREE.Mesh(new THREE.BoxGeometry(4.4, 1.2, 0.1), glassMat);
+  windshield.rotation.x = 0.35;
+  windshield.position.set(0, 2.6, 2.8);
+  hullGroup.add(windshield);
+
+  // Captain's Console & Steering Wheel
+  const consoleMesh = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.8, 0.7), darkNavy);
+  consoleMesh.position.set(0.8, 2.4, 2.2);
+  const wheel = new THREE.Mesh(new THREE.TorusGeometry(0.22, 0.04, 8, 16), chromeMat);
+  wheel.position.set(0.8, 2.7, 2.0);
+  wheel.rotation.x = -0.4;
+  hullGroup.add(consoleMesh, wheel);
+
+  // Leather Seats
+  const seatMat = getStandardMat('#f1f5f9', 0.6, 0.1);
+  for (const [sx, sz] of [
+    [0.8, 1.2],
+    [-0.8, 1.2],
+    [0.8, -1.2],
+    [-0.8, -1.2],
+  ]) {
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.6, 0.9), seatMat);
+    seat.position.set(sx, 2.3, sz);
+    const back = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.8, 0.2), seatMat);
+    back.position.set(sx, 2.8, sz - 0.4);
+    hullGroup.add(seat, back);
+  }
+
+  // Sun Lounge Deck at Stern
+  const sunPad = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.3, 2.4), blueTrim);
+  sunPad.position.set(0, 2.15, -3.8);
+  hullGroup.add(sunPad);
+
+  // Twin Outboard Motors at rear
+  const motorMat = getStandardMat('#1e293b', 0.3, 0.6);
+  const propellers: THREE.Mesh[] = [];
+  [-1.2, 1.2].forEach((mx) => {
+    const motorMount = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.4, 0.8), motorMat);
+    motorMount.position.set(mx, 1.4, -5.5);
+    const motorShaft = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 1.0, 8), chromeMat);
+    motorShaft.position.set(mx, 0.5, -5.5);
+    const prop = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.12, 0.04), chromeMat);
+    prop.position.set(mx, 0.2, -5.7);
+    propellers.push(prop);
+    hullGroup.add(motorMount, motorShaft, prop);
+  });
+
+  // Navigation lights (Red on Port/Left, Green on Starboard/Right)
+  const redNav = new THREE.Mesh(
+    new THREE.SphereGeometry(0.08, 8, 8),
+    new THREE.MeshBasicMaterial({ color: 0xef4444 })
+  );
+  redNav.position.set(-2.4, 2.1, 4.0);
+  const greenNav = new THREE.Mesh(
+    new THREE.SphereGeometry(0.08, 8, 8),
+    new THREE.MeshBasicMaterial({ color: 0x22c55e })
+  );
+  greenNav.position.set(2.4, 2.1, 4.0);
+  hullGroup.add(redNav, greenNav);
+
+  // Stern flag pole and nautical flag
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 1.8, 6), chromeMat);
+  pole.position.set(1.6, 2.8, -4.8);
+  const flag = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.7, 0.45),
+    new THREE.MeshStandardMaterial({ color: 0xef4444, side: THREE.DoubleSide })
+  );
+  flag.position.set(1.95, 3.3, -4.8);
+  hullGroup.add(pole, flag);
+
+  group.add(hullGroup);
+
+  // Water Wake Group (trails behind boat in water)
+  const wakeGroup = new THREE.Group();
+  wakeGroup.position.set(0, 0.05, -6.0);
+  const wakeMat = new THREE.MeshBasicMaterial({
+    color: 0xe0f2fe,
+    transparent: true,
+    opacity: 0.65,
+    side: THREE.DoubleSide,
+  });
+  const wakeMesh = new THREE.Mesh(new THREE.PlaneGeometry(4.0, 10), wakeMat);
+  wakeMesh.rotation.x = -Math.PI / 2;
+  wakeMesh.position.z = -5.0;
+  wakeGroup.add(wakeMesh);
+  group.add(wakeGroup);
+
+  return { group, propellers, wakeGroup };
+}
+
+/**
+ * Procedural 3D Mesh Generator for the Driveable Metro Airport Helicopter
+ */
+export function buildHelicopter3DModel(): {
+  group: THREE.Group;
+  mainRotor: THREE.Group;
+  tailRotor: THREE.Group;
+  beaconLight: THREE.PointLight;
+} {
+  const group = new THREE.Group();
+
+  const bodyMat = getStandardMat('#eab308', 0.25, 0.2); // Vibrant aviation gold/yellow
+  const whiteMat = getStandardMat('#f8fafc', 0.3, 0.1);
+  const darkMetal = getStandardMat('#1e293b', 0.4, 0.7);
+  const skidMat = getStandardMat('#475569', 0.2, 0.85);
+  const carbonMat = getStandardMat('#090d16', 0.3, 0.5);
+
+  const glassMat = new THREE.MeshPhysicalMaterial({
+    color: 0x38bdf8,
+    transparent: true,
+    opacity: 0.65,
+    roughness: 0.1,
+    transmission: 0.85,
+  });
+
+  // 1. Aerodynamic Cabin Fuselage
+  const cabin = new THREE.Mesh(new THREE.BoxGeometry(2.4, 2.2, 4.4), bodyMat);
+  cabin.position.set(0, 1.8, 0);
+  cabin.castShadow = true;
+  group.add(cabin);
+
+  // Nose taper
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(1.5, 2.0, 6), bodyMat);
+  nose.rotation.x = Math.PI / 2;
+  nose.position.set(0, 1.7, 2.8);
+  nose.castShadow = true;
+  group.add(nose);
+
+  // Curved Cockpit Windshield Canopy
+  const canopy = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.4, 2.2), glassMat);
+  canopy.position.set(0, 2.0, 1.4);
+  group.add(canopy);
+
+  // Cockpit Seats & Controls
+  const pilotSeatL = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 0.7), darkMetal);
+  pilotSeatL.position.set(-0.55, 1.4, 1.1);
+  const pilotSeatR = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 0.7), darkMetal);
+  pilotSeatR.position.set(0.55, 1.4, 1.1);
+  group.add(pilotSeatL, pilotSeatR);
+
+  // 2. Landing Skids (Twin tubular skids)
+  const skidL = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.12, 5.2), skidMat);
+  skidL.position.set(-1.25, 0.1, 0.2);
+  const skidR = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.12, 5.2), skidMat);
+  skidR.position.set(1.25, 0.1, 0.2);
+  skidL.castShadow = true;
+  skidR.castShadow = true;
+  group.add(skidL, skidR);
+
+  // Skid Struts
+  for (const sz of [-1.0, 1.2]) {
+    const strutL = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 1.4, 6), skidMat);
+    strutL.rotation.z = -0.3;
+    strutL.position.set(-0.95, 0.7, sz);
+    const strutR = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 1.4, 6), skidMat);
+    strutR.rotation.z = 0.3;
+    strutR.position.set(0.95, 0.7, sz);
+    group.add(strutL, strutR);
+  }
+
+  // 3. Tail Boom & Fin
+  const tailBoom = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.6, 5.8, 8), whiteMat);
+  tailBoom.rotation.x = Math.PI / 2;
+  tailBoom.position.set(0, 2.1, -4.5);
+  tailBoom.castShadow = true;
+  group.add(tailBoom);
+
+  // Tail Horizontal Stabilizers
+  const tailWing = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.08, 0.6), bodyMat);
+  tailWing.position.set(0, 2.2, -6.5);
+  group.add(tailWing);
+
+  // Tail Vertical Fin
+  const tailFin = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.6, 1.0), bodyMat);
+  tailFin.position.set(0, 2.8, -7.2);
+  tailFin.rotation.x = -0.2;
+  group.add(tailFin);
+
+  // 4. Main Rotor Mast & Blades
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.8, 8), darkMetal);
+  mast.position.set(0, 3.2, 0.2);
+  group.add(mast);
+
+  const mainRotor = new THREE.Group();
+  mainRotor.position.set(0, 3.6, 0.2);
+  const rotorHub = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 0.18, 12), darkMetal);
+  mainRotor.add(rotorHub);
+
+  // 4 Rotor Blades (Length ~6.5m diameter)
+  for (let i = 0; i < 4; i++) {
+    const angle = (i * Math.PI) / 2;
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.04, 3.6), carbonMat);
+    blade.position.set(Math.sin(angle) * 1.9, 0.06, Math.cos(angle) * 1.9);
+    blade.rotation.y = angle;
+    mainRotor.add(blade);
+  }
+  group.add(mainRotor);
+
+  // 5. Tail Rotor (Anti-torque rotor)
+  const tailRotor = new THREE.Group();
+  tailRotor.position.set(0.18, 3.1, -7.2);
+  const tailRotorHub = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.1, 8), darkMetal);
+  tailRotorHub.rotation.z = Math.PI / 2;
+  tailRotor.add(tailRotorHub);
+
+  const tailBlade1 = new THREE.Mesh(new THREE.BoxGeometry(0.03, 1.1, 0.14), carbonMat);
+  const tailBlade2 = tailBlade1.clone();
+  tailBlade2.rotation.z = Math.PI / 2;
+  tailRotor.add(tailBlade1, tailBlade2);
+  group.add(tailRotor);
+
+  // 6. Anti-Collision Flashing Beacon & Searchlight
+  const beaconMesh = new THREE.Mesh(
+    new THREE.SphereGeometry(0.1, 8, 8),
+    new THREE.MeshBasicMaterial({ color: 0xef4444 })
+  );
+  beaconMesh.position.set(0, 3.75, 0.2);
+  group.add(beaconMesh);
+
+  const beaconLight = new THREE.PointLight(0xef4444, 1.2, 10);
+  beaconLight.position.set(0, 3.8, 0.2);
+  group.add(beaconLight);
+
+  // Nose Spotlight
+  const spotlight = new THREE.SpotLight(0xffffff, 2.5, 35, 0.45, 0.5);
+  spotlight.position.set(0, 1.2, 3.0);
+  spotlight.target.position.set(0, -2.0, 12.0);
+  group.add(spotlight, spotlight.target);
+
+  return { group, mainRotor, tailRotor, beaconLight };
+}
+
