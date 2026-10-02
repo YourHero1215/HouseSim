@@ -1,0 +1,6 @@
+{
+  "name": "HouseSim",
+  "description": "3D virtual house simulation for Chromebooks with built-in camera and video 3D object scanning, WASD/arrow character movement, E-key object interaction, and Cloudflare Workers deployment support.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
