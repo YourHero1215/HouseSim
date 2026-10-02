@@ -1,6 +1,6 @@
 {
   "name": "HouseSim",
-  "description": "3D virtual house simulation for Chromebooks with built-in camera and video 3D object scanning, WASD/arrow character movement, E-key object interaction, and Cloudflare Workers deployment support.",
-  "requestFramePermissions": ["camera"],
+  "description": "3D virtual house and city life simulation. Expand your home, get a job to make money ($), buy cars, pets, furniture, and wall items, drive on roads, and explore a bustling city with shops and NPCs.",
+  "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

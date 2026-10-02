@@ -1,86 +1,126 @@
-export type ScanShapeMode = 'lathe' | 'extrude' | 'voxel' | 'box';
+export type ItemCategory =
+  | 'furniture'
+  | 'wall_decor'
+  | 'electronics'
+  | 'outdoor'
+  | 'car'
+  | 'pet'
+  | 'everyday';
 
-export type InteractionBehavior =
-  | 'inspect'
-  | 'toggle_light'
-  | 'play_sound'
-  | 'spin_animate';
+export type PlacementType =
+  | 'floor'
+  | 'wall_only'
+  | 'table_or_floor'
+  | 'backyard_only'
+  | 'driveway_only';
 
-export interface VoxelCell {
-  r: number;
-  g: number;
-  b: number;
-  depth: number;
-  active: boolean;
-}
-
-export interface ScannedObjectAsset {
+export interface CatalogItem {
   id: string;
   name: string;
-  category: 'Decor' | 'Electronics' | 'Kitchenware' | 'Lighting' | 'Collectible';
-  sourceType: 'camera' | 'video' | 'preset';
-  scannedAt: string;
-  textureDataUrl: string;
-  multiAngleFrames?: string[];
-  silhouetteProfile: number[]; // 16 vertical slices, 0.05..1.0 normalized width
-  voxelGrid?: VoxelCell[][]; // 14x14 depth/color grid
-  dominantColor: string;
-  secondaryColor: string;
-  shapeMode: ScanShapeMode;
-  dimensions: {
-    width: number;
-    height: number;
-    depth: number;
-  };
-  roughness: number;
-  metalness: number;
-  interactionBehavior: InteractionBehavior;
-  interactionNote: string;
-  lidarCompensationMethod?: 'photogrammetry' | 'ai_monocular_depth' | 'silhouette_lathe' | 'voxel_relief';
-  lidarExplanation?: string;
+  category: ItemCategory;
+  price: number; // in Dollars ($)
+  description: string;
+  placementType: PlacementType;
+  dimensions: { width: number; height: number; depth: number };
+  color: string;
+  secondaryColor?: string;
+  modelStyle: string;
+  interactiveAction?: string;
 }
 
-export interface PlacedHouseObject {
+export interface PlacedItem {
   instanceId: string;
-  assetId: string;
+  itemId: string;
   name: string;
-  room: string;
+  category: ItemCategory;
+  placementType: PlacementType;
   position: [number, number, number];
   rotationY: number;
+  wallNormal?: [number, number, number];
+  isOnWall: boolean;
+  zone: 'interior' | 'backyard' | 'driveway';
   scale: number;
   isActiveState: boolean;
-  surfaceName: string;
 }
 
-export interface BuiltinFixture {
+export interface CarVehicle {
   id: string;
   name: string;
-  room: string;
-  position: [number, number, number];
-  interactionPrompt: string;
-  isActive: boolean;
+  price: number;
+  color: string;
+  maxSpeed: number;
+  acceleration: number;
+  handling: number;
+  modelStyle: 'sedan' | 'roadster' | 'muscle' | 'cybertruck';
   description: string;
 }
 
-export type CameraViewMode = 'follow' | 'first_person' | 'orbit';
-export type TimeOfDay = 'day' | 'sunset' | 'night';
-export type WallCutawayMode = 'auto' | 'down' | 'full';
+export interface PetItem {
+  id: string;
+  name: string;
+  breed: string;
+  price: number;
+  petType: 'dog_retriever' | 'dog_shiba' | 'cat_calico' | 'bunny_lop';
+  color: string;
+  description: string;
+}
 
-export interface HumanTelemetry {
+export interface PlacedPet {
+  instanceId: string;
+  petId: string;
+  customName: string;
+  petType: 'dog_retriever' | 'dog_shiba' | 'cat_calico' | 'bunny_lop';
+  position: [number, number, number];
+  rotationY: number;
+  happiness: number;
+  isFollowing: boolean;
+}
+
+export interface JobInfo {
+  id: string;
+  title: string;
+  workplaceName: string;
+  basePay: number; // Dollars per shift ($)
+  shiftDurationSec: number;
+  taskType: 'coffee' | 'courier' | 'coding' | 'architect';
+  description: string;
+}
+
+export interface NPCData {
+  id: string;
+  name: string;
+  role: string;
+  outfitColor: string;
+  position: [number, number, number];
+  rotationY: number;
+  waypoints: [number, number][];
+  currentWaypointIdx: number;
+  dialogueList: string[];
+}
+
+export interface HouseTierInfo {
+  tier: number;
+  name: string;
+  price: number;
+  description: string;
+  unlockedRooms: string[];
+  hasBackyard: boolean;
+}
+
+export interface PlayerState {
+  cash: number; // Dollars ($)
+  currentJobId: string | null;
+  houseTier: number; // 1, 2, or 3
+  ownedCarIds: string[];
+  activeCarId: string | null;
+  ownedPetIds: string[];
+  inventory: string[]; // list of CatalogItem ids
+}
+
+export interface CarPhysics {
   x: number;
   z: number;
   rotationY: number;
-  currentRoom: string;
-  isMoving: boolean;
-  carriedInstanceId: string | null;
-}
-
-export interface NearbyInteractable {
-  type: 'scanned' | 'fixture';
-  id: string;
-  name: string;
-  prompt: string;
-  distance: number;
-  room: string;
-  canPickUp: boolean;
+  speed: number;
+  steering: number;
 }
