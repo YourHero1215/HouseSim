@@ -410,17 +410,22 @@ export default function App() {
 
   const handleBuyPet = (pet: PetItem) => {
     setPlayerCash((prev) => prev - pet.price);
+    // Interior house living room coordinates (center is x: -11.0, z: 8.0)
+    const spawnX = -11.0 + (Math.random() - 0.5) * 2.8;
+    const spawnZ = 8.0 + (Math.random() - 0.5) * 2.2;
     const newPet: PlacedPet = {
       instanceId: `pet-${Date.now()}`,
       petId: pet.id,
       customName: pet.name,
       petType: pet.petType,
-      position: [-8, 0, 7],
-      rotationY: 0,
+      position: [spawnX, 0, spawnZ],
+      rotationY: Math.random() * Math.PI * 2,
       happiness: 100,
-      isFollowing: true,
+      isFollowing: false,
     };
     setPlacedPets((prev) => [...prev, newPet]);
+    soundFX.playPetChirp();
+    handleShowCityToast(`🐾 ${pet.name} has spawned in your living room! Go home to cuddle your pet!`);
   };
 
   const handleUpgradeHouse = (tierInfo: HouseTierInfo) => {

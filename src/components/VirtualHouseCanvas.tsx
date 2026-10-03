@@ -21,7 +21,7 @@ import {
   buildPet3DModel,
 } from '../utils/world3DBuilder';
 import { soundFX } from '../utils/soundEffects';
-import { CITY_NPCS } from '../data/catalog';
+import { CITY_NPCS, PETS_CATALOG } from '../data/catalog';
 
 interface VirtualHouseCanvasProps {
   playerCash: number;
@@ -287,6 +287,17 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
   const speedTrapCooldownRef = useRef<number>(0);
   const stuntJumpCooldownRef = useRef<number>(0);
 
+  // Household Pets 3D Refs
+  const petsGroupRef = useRef<THREE.Group | null>(null);
+  const petRecordsRef = useRef<{
+    instanceId: string;
+    group: THREE.Group;
+    data: PlacedPet;
+    targetPos: THREE.Vector3;
+    wanderTimer: number;
+    legPhase: number;
+  }[]>([]);
+
   // Human Position State (Persisted)
   const humanPosRef = useRef<THREE.Vector3>(
     new THREE.Vector3(
@@ -333,6 +344,49 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
       group.add(model);
     });
   }, [placedItems]);
+
+  // Sync Spawned Household Pets in Player's House
+  useEffect(() => {
+    const pGroup = petsGroupRef.current;
+    if (!pGroup) return;
+    while (pGroup.children.length > 0) {
+      pGroup.remove(pGroup.children[0]);
+    }
+    petRecordsRef.current = [];
+
+    placedPets.forEach((pet) => {
+      const catalogPet = PETS_CATALOG.find((p) => p.id === pet.petId) || {
+        id: pet.petId,
+        name: pet.customName,
+        breed: 'Household Companion',
+        price: 0,
+        petType: pet.petType,
+        color: pet.petType === 'bunny_lop' ? '#f8fafc' : pet.petType === 'cat_calico' ? '#f59e0b' : '#d97706',
+        description: '',
+      };
+
+      const petMesh = buildPet3DModel(catalogPet);
+      // Spawn safely inside player's house living room (x: ~ -11, z: ~ 8)
+      let px = pet.position[0];
+      let pz = pet.position[2];
+      if (px > -4 || px < -22 || pz < 2 || pz > 14) {
+        px = -11.0 + (Math.random() - 0.5) * 2.8;
+        pz = 8.0 + (Math.random() - 0.5) * 2.2;
+      }
+      petMesh.position.set(px, 0, pz);
+      petMesh.rotation.y = pet.rotationY || Math.random() * Math.PI * 2;
+      pGroup.add(petMesh);
+
+      petRecordsRef.current.push({
+        instanceId: pet.instanceId,
+        group: petMesh,
+        data: pet,
+        targetPos: new THREE.Vector3(px, 0, pz),
+        wanderTimer: Math.random() * 3 + 1,
+        legPhase: 0,
+      });
+    });
+  }, [placedPets]);
 
   // Sync Ghost Placement Preview Model
   useEffect(() => {
@@ -1470,6 +1524,11 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
     scene.add(placedGroup);
     placedGroupRef.current = placedGroup;
 
+    // Spawned Household Pets Group in House
+    const petsGroup = new THREE.Group();
+    scene.add(petsGroup);
+    petsGroupRef.current = petsGroup;
+
     // Ghost Placement Preview
     const ghostGroup = new THREE.Group();
     ghostGroup.visible = false;
@@ -1612,6 +1671,11 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
       const k = e.key.toLowerCase();
       keys.add(k);
 
+      // Camera Keyboard Rotation Keys: I, J, K, L
+      if (k === 'i' || k === 'j' || k === 'k' || k === 'l') {
+        e.preventDefault();
+      }
+
       // 'R' Key: Rotate Object during placement
       if ((k === 'r' || k === 'R') && !e.repeat && stateRef.current.activePlacingItem) {
         e.preventDefault();
@@ -1692,6 +1756,19 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
         }
 
         // 4. On Foot: Check Interactive Objects in proximity
+
+        // 0. Check Household Pets in House First!
+        for (const record of petRecordsRef.current) {
+          const dist = humanPosRef.current.distanceTo(record.group.position);
+          if (dist < 2.5) {
+            e.preventDefault();
+            soundFX.playPetChirp();
+            cur.onInteractWithPet(record.data);
+            cur.onShowToast?.(`💖 You petted ${record.data.customName}! Tail is wagging happily!`);
+            record.group.position.y = 0.25;
+            return;
+          }
+        }
 
         // A. Pour Gas Jug into Stalled Car Tank
         const carDist = humanPosRef.current.distanceTo(
@@ -2250,6 +2327,25 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
       const curVehicle = cur.activeVehicle ?? (cur.isDrivingCar ? 'car' : null);
 
       // =======================================================================
+      // CAMERA ROTATION CONTROLS (I, J, K, L Keys + Mouse Orbit)
+      // I: Tilt Up · K: Tilt Down · J: Orbit Left · L: Orbit Right
+      // =======================================================================
+      const camRotSpeed = 2.4;
+      const camPitchSpeed = 1.6;
+      if (keys.has('j')) {
+        cameraYawRef.current += camRotSpeed * dt;
+      }
+      if (keys.has('l')) {
+        cameraYawRef.current -= camRotSpeed * dt;
+      }
+      if (keys.has('i')) {
+        cameraPitchRef.current = Math.min(1.42, cameraPitchRef.current + camPitchSpeed * dt);
+      }
+      if (keys.has('k')) {
+        cameraPitchRef.current = Math.max(0.12, cameraPitchRef.current - camPitchSpeed * dt);
+      }
+
+      // =======================================================================
       // 1A. DRIVEABLE HELICOPTER SIMULATION (q=up, e=down/landing, w/s pitch, a/d yaw)
       // =======================================================================
       if (curVehicle === 'helicopter') {
@@ -2761,6 +2857,22 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
         const distToSmoothie = hPos.distanceTo(new THREE.Vector3(-110, 0, 92));
         const distToTele = hPos.distanceTo(new THREE.Vector3(-105, 0, -125));
 
+        // Check if near any household pet in house
+        let nearbyPetPrompt: { text: string; icon: string; actionId: string } | null = null;
+        for (const record of petRecordsRef.current) {
+          const dist = hPos.distanceTo(record.group.position);
+          if (dist < 2.5) {
+            const pet = record.data;
+            const icon = pet.petType === 'bunny_lop' ? '🐰' : pet.petType === 'cat_calico' ? '🐱' : '🐶';
+            nearbyPetPrompt = {
+              text: `Press [E] to Pet & Cuddle ${pet.customName || 'Pet'} (❤️ Happiness 100%)`,
+              icon,
+              actionId: `pet_${record.instanceId}`,
+            };
+            break;
+          }
+        }
+
         // Check if near any placed furniture in house
         let nearbyFurniturePrompt: { text: string; icon: string; actionId: string } | null = null;
         for (const placed of cur.placedItems) {
@@ -2788,7 +2900,9 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
           }
         }
 
-        if (nearbyFurniturePrompt) {
+        if (nearbyPetPrompt) {
+          setNearbyPrompt(nearbyPetPrompt);
+        } else if (nearbyFurniturePrompt) {
           setNearbyPrompt(nearbyFurniturePrompt);
         } else if (distToCar < 3.8 && cur.hasGasJug) {
           setNearbyPrompt({ text: 'Press [E] to Pour Gas Jug into Car Tank', icon: '⛽', actionId: 'refuel_jug' });
@@ -2897,6 +3011,79 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
         }
       });
 
+      // 5. HOUSEHOLD PETS LIVING & WANDERING IN HOUSE
+      const pPos = humanPosRef.current;
+      petRecordsRef.current.forEach((record) => {
+        const pGrp = record.group;
+        const parts = pGrp.userData as { tail?: THREE.Mesh; legs?: THREE.Mesh[]; head?: THREE.Mesh; petType?: string };
+
+        // Tail wagging animation
+        if (parts && parts.tail) {
+          parts.tail.rotation.y = Math.sin(clock.getElapsedTime() * 12) * 0.45;
+        }
+
+        const distToPlayer = pGrp.position.distanceTo(pPos);
+        const isPlayerInHouse = pPos.x > -22 && pPos.x < -6 && pPos.z > 2 && pPos.z < 14;
+
+        // If player is inside the house and close to pet (< 3.0m), turn to face player
+        if (isPlayerInHouse && distToPlayer < 3.0) {
+          const lookDir = new THREE.Vector3().subVectors(pPos, pGrp.position);
+          lookDir.y = 0;
+          if (lookDir.lengthSq() > 0.001) {
+            pGrp.rotation.y = Math.atan2(lookDir.x, lookDir.z);
+          }
+
+          // Gentle breathing or hopping
+          if (parts.petType === 'bunny_lop') {
+            pGrp.position.y = Math.abs(Math.sin(clock.getElapsedTime() * 7)) * 0.12;
+          } else {
+            pGrp.position.y = Math.sin(clock.getElapsedTime() * 4) * 0.02;
+          }
+
+          if (parts.legs) {
+            parts.legs.forEach((l) => (l.rotation.x = 0));
+          }
+        } else {
+          // Wander peacefully around the house living room
+          record.wanderTimer -= dt;
+          if (record.wanderTimer <= 0) {
+            record.wanderTimer = 3.5 + Math.random() * 4.5;
+            // Target spot inside house interior (centered around x: -11, z: 8)
+            const randX = -13.5 + Math.random() * 5.0;
+            const randZ = 5.5 + Math.random() * 4.5;
+            record.targetPos.set(randX, 0, randZ);
+          }
+
+          const moveDir = new THREE.Vector3().subVectors(record.targetPos, pGrp.position);
+          moveDir.y = 0;
+          const distToTarget = moveDir.length();
+
+          if (distToTarget > 0.25) {
+            moveDir.normalize();
+            const petWalkSpeed = parts.petType === 'bunny_lop' ? 1.4 : 1.1;
+            pGrp.position.addScaledVector(moveDir, petWalkSpeed * dt);
+            pGrp.rotation.y = Math.atan2(moveDir.x, moveDir.z);
+
+            record.legPhase += dt * 8;
+            if (parts.legs && parts.legs.length >= 4) {
+              const swing = Math.sin(record.legPhase) * 0.45;
+              parts.legs[0].rotation.x = swing;
+              parts.legs[1].rotation.x = -swing;
+              parts.legs[2].rotation.x = -swing;
+              parts.legs[3].rotation.x = swing;
+            }
+            if (parts.petType === 'bunny_lop') {
+              pGrp.position.y = Math.abs(Math.sin(record.legPhase * 2)) * 0.14;
+            }
+          } else {
+            if (parts.legs) {
+              parts.legs.forEach((l) => (l.rotation.x = 0));
+            }
+            pGrp.position.y = 0;
+          }
+        }
+      });
+
       // Periodically auto-save player & vehicle positions
       saveTimer += dt;
       if (saveTimer >= 2.5) {
@@ -2960,6 +3147,29 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
           <span className="tracking-wide text-sm font-display">{crashNotification}</span>
         </div>
       )}
+
+      {/* Navigation & Controls Guide HUD */}
+      <div className="pointer-events-none absolute bottom-4 left-4 z-20 flex flex-col gap-1 bg-slate-950/85 backdrop-blur-md px-3.5 py-2 rounded-xl border border-white/10 text-[11px] text-slate-300 font-mono shadow-xl">
+        <div className="flex items-center gap-1.5 text-white font-bold font-sans text-xs">
+          <span>🎮 Controls</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="text-amber-400 font-bold">WASD</span>
+          <span>Move</span>
+          <span className="text-slate-500">·</span>
+          <span className="text-sky-400 font-bold">I J K L</span>
+          <span>Rotate Camera</span>
+        </div>
+        <div className="flex items-center gap-1.5 text-slate-400 text-[10px]">
+          <span>Right-Click Drag: Orbit</span>
+          <span>·</span>
+          <span>Wheel: Zoom</span>
+          <span>·</span>
+          <span>[R]: Rotate Placing</span>
+          <span>·</span>
+          <span>[E]: Interact</span>
+        </div>
+      </div>
 
       {/* Interactive Proximity Action Prompt */}
       {nearbyPrompt && !stateRef.current.activeVehicle && !stateRef.current.isDrivingCar && (

@@ -1,11 +1,17 @@
 import * as THREE from 'three';
 import { CatalogItem, CarVehicle, PetItem } from '../types/housesim';
 
-// Materials Cache for high-performance rendering
+// Materials & Textures Cache for high-performance rendering
 const matCache = new Map<string, THREE.Material>();
+const texCache = new Map<string, THREE.CanvasTexture>();
 
-function getStandardMat(colorHex: string, roughness: number = 0.45, metalness: number = 0.1): THREE.MeshStandardMaterial {
-  const key = `${colorHex}_${roughness}_${metalness}`;
+function getStandardMat(
+  colorHex: string,
+  roughness: number = 0.45,
+  metalness: number = 0.1,
+  map?: THREE.Texture | null
+): THREE.MeshStandardMaterial {
+  const key = `${colorHex}_${roughness}_${metalness}_${map ? map.uuid : 'nomap'}`;
   if (matCache.has(key)) {
     return matCache.get(key) as THREE.MeshStandardMaterial;
   }
@@ -13,9 +19,575 @@ function getStandardMat(colorHex: string, roughness: number = 0.45, metalness: n
     color: new THREE.Color(colorHex),
     roughness,
     metalness,
+    map: map || null,
   });
   matCache.set(key, mat);
   return mat;
+}
+
+/**
+ * Procedural TV Screen Canvas Texture
+ * Renders an ultra-crisp 4K broadcast with live stadium sports, scores, tickers, and HDR logos.
+ */
+function getTVTexture(isActive: boolean): THREE.CanvasTexture {
+  const key = `tv_tex_${isActive ? 'active' : 'standby'}`;
+  if (texCache.has(key)) return texCache.get(key)!;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 288;
+  const ctx = canvas.getContext('2d')!;
+
+  if (isActive) {
+    // 1. Dynamic Vibrant Sports Stadium Broadcast
+    // Sky gradient at night stadium
+    const skyGrad = ctx.createLinearGradient(0, 0, 0, 160);
+    skyGrad.addColorStop(0, '#020617');
+    skyGrad.addColorStop(0.5, '#0f172a');
+    skyGrad.addColorStop(1, '#1e293b');
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(0, 0, 512, 160);
+
+    // Stadium Floodlights in corners with beam flare
+    ctx.fillStyle = 'rgba(254, 240, 138, 0.35)';
+    ctx.beginPath();
+    ctx.moveTo(30, 0);
+    ctx.lineTo(0, 140);
+    ctx.lineTo(160, 140);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.moveTo(482, 0);
+    ctx.lineTo(352, 140);
+    ctx.lineTo(512, 140);
+    ctx.closePath();
+    ctx.fill();
+
+    // Stadium Crowd / Stands Silhouettes
+    ctx.fillStyle = '#1e1b4b';
+    ctx.fillRect(0, 110, 512, 35);
+    for (let x = 8; x < 512; x += 14) {
+      ctx.fillStyle = (x % 28 === 0) ? '#38bdf8' : '#e0e7ff';
+      ctx.fillRect(x, 116 + (x % 3) * 2, 7, 7);
+    }
+
+    // Lush Green Pitch / Turf
+    const turfGrad = ctx.createLinearGradient(0, 145, 0, 288);
+    turfGrad.addColorStop(0, '#15803d');
+    turfGrad.addColorStop(0.5, '#16a34a');
+    turfGrad.addColorStop(1, '#14532d');
+    ctx.fillStyle = turfGrad;
+    ctx.fillRect(0, 145, 512, 143);
+
+    // Pitch Stripes
+    ctx.fillStyle = 'rgba(22, 163, 74, 0.4)';
+    for (let x = 0; x < 512; x += 64) {
+      ctx.fillRect(x, 145, 32, 143);
+    }
+
+    // Pitch White Lines & Center Circle
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(0, 215);
+    ctx.lineTo(512, 215);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(256, 215, 45, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Center spot & ball
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(256, 215, 6, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Soccer ball shadow
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+    ctx.beginPath();
+    ctx.ellipse(285, 195, 8, 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Soccer ball
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(285, 188, 7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(284, 186, 3, 3);
+
+    // TOP-LEFT: Score Bug Overlay
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
+    ctx.fillRect(16, 14, 210, 36);
+    ctx.strokeStyle = '#38bdf8';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(16, 14, 210, 36);
+
+    ctx.fillStyle = '#38bdf8';
+    ctx.font = 'bold 12px sans-serif';
+    ctx.fillText('METRO FC', 26, 36);
+
+    ctx.fillStyle = '#facc15';
+    ctx.font = '900 15px monospace';
+    ctx.fillText('2 - 1', 106, 37);
+
+    ctx.fillStyle = '#ef4444';
+    ctx.font = 'bold 12px sans-serif';
+    ctx.fillText('RIVALS', 160, 36);
+
+    // Live Badge
+    ctx.fillStyle = '#ef4444';
+    ctx.beginPath();
+    ctx.arc(244, 24, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 10px sans-serif';
+    ctx.fillText('LIVE', 253, 28);
+
+    // TOP-RIGHT: 4K HDR & Station Bug
+    ctx.fillStyle = 'rgba(2, 6, 23, 0.75)';
+    ctx.fillRect(410, 14, 88, 26);
+    ctx.fillStyle = '#38bdf8';
+    ctx.font = 'bold 11px sans-serif';
+    ctx.fillText('METRO 4K', 420, 31);
+
+    // BOTTOM: News & Ticker Bar
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
+    ctx.fillRect(0, 258, 512, 30);
+    ctx.fillStyle = '#eab308';
+    ctx.fillRect(0, 258, 64, 30);
+    ctx.fillStyle = '#090d16';
+    ctx.font = 'bold 11px sans-serif';
+    ctx.fillText('ALERT', 12, 277);
+
+    ctx.fillStyle = '#f8fafc';
+    ctx.font = '11px sans-serif';
+    ctx.fillText('METRO CITY SPEEDWAY CHAMPIONSHIP OPEN · GROCERY STOCKS FRESH ARABICA BEANS', 74, 277);
+  } else {
+    // Standby Ambient Screen
+    const bgGrad = ctx.createLinearGradient(0, 0, 512, 288);
+    bgGrad.addColorStop(0, '#090d16');
+    bgGrad.addColorStop(1, '#020617');
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, 512, 288);
+
+    // Subtle center clock
+    ctx.fillStyle = '#475569';
+    ctx.font = '300 36px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('12:45', 256, 135);
+
+    ctx.font = '12px sans-serif';
+    ctx.fillStyle = '#334155';
+    ctx.fillText('METRO VISION OLED · STANDBY MODE', 256, 165);
+
+    // Red standby LED dot
+    ctx.fillStyle = '#ef4444';
+    ctx.beginPath();
+    ctx.arc(256, 265, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.textAlign = 'start';
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texCache.set(key, texture);
+  return texture;
+}
+
+/**
+ * Procedural Wood Grain Texture for Tables, Desks, Beds, and Shelves
+ */
+function getWoodTexture(baseColorHex: string = '#78350f', darkColorHex: string = '#451a03'): THREE.CanvasTexture {
+  const key = `wood_${baseColorHex}_${darkColorHex}`;
+  if (texCache.has(key)) return texCache.get(key)!;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d')!;
+
+  ctx.fillStyle = baseColorHex;
+  ctx.fillRect(0, 0, 256, 256);
+
+  // Planks Seams
+  ctx.strokeStyle = darkColorHex;
+  ctx.lineWidth = 2.5;
+  for (let x = 64; x < 256; x += 64) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, 256);
+    ctx.stroke();
+  }
+
+  // Realistic wood grain wave lines
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.12)';
+  ctx.lineWidth = 1.2;
+  for (let y = 6; y < 256; y += 8) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    for (let x = 0; x <= 256; x += 20) {
+      const offset = Math.sin((x / 256) * Math.PI * 3 + y) * 3;
+      ctx.lineTo(x, y + offset);
+    }
+    ctx.stroke();
+  }
+
+  // Wood knots
+  for (let i = 0; i < 3; i++) {
+    const kx = 40 + i * 85;
+    const ky = 60 + (i % 2) * 110;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.18)';
+    ctx.beginPath();
+    ctx.ellipse(kx, ky, 6, 12, 0.2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(2, 2);
+  texCache.set(key, texture);
+  return texture;
+}
+
+/**
+ * Procedural Woven Fabric Texture for Sofas, Beds, and Cushions
+ */
+function getFabricTexture(colorHex: string = '#0284c7'): THREE.CanvasTexture {
+  const key = `fabric_${colorHex}`;
+  if (texCache.has(key)) return texCache.get(key)!;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d')!;
+
+  ctx.fillStyle = colorHex;
+  ctx.fillRect(0, 0, 256, 256);
+
+  // Micro crosshatch weave
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 256; i += 4) {
+    ctx.beginPath();
+    ctx.moveTo(i, 0);
+    ctx.lineTo(i, 256);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(0, i);
+    ctx.lineTo(256, i);
+    ctx.stroke();
+  }
+
+  // Diamond cushion tufting seams
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.18)';
+  ctx.lineWidth = 2;
+  for (let i = -128; i < 384; i += 64) {
+    ctx.beginPath();
+    ctx.moveTo(i, 0);
+    ctx.lineTo(i + 256, 256);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(i + 256, 0);
+    ctx.lineTo(i, 256);
+    ctx.stroke();
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(1.5, 1.5);
+  texCache.set(key, texture);
+  return texture;
+}
+
+/**
+ * Procedural Espresso Machine Front Panel Texture
+ */
+function getEspressoTexture(): THREE.CanvasTexture {
+  const key = 'espresso_face_tex';
+  if (texCache.has(key)) return texCache.get(key)!;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d')!;
+
+  // Brushed steel gradient
+  const grad = ctx.createLinearGradient(0, 0, 256, 256);
+  grad.addColorStop(0, '#e2e8f0');
+  grad.addColorStop(0.5, '#cbd5e1');
+  grad.addColorStop(1, '#94a3b8');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 256, 256);
+
+  // Top branding badge
+  ctx.fillStyle = '#0f172a';
+  ctx.fillRect(40, 14, 176, 24);
+  ctx.fillStyle = '#f59e0b';
+  ctx.font = 'bold 11px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('BARISTA PRO ESPRESSO', 128, 30);
+
+  // Dual circular analog pressure gauges (Left: 9 BAR extraction, Right: 15 BAR steam)
+  const drawGauge = (cx: number, cy: number, label: string) => {
+    ctx.fillStyle = '#090d16';
+    ctx.beginPath();
+    ctx.arc(cx, cy, 32, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#d97706';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    // Needle
+    ctx.strokeStyle = '#ef4444';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + 16, cy - 16);
+    ctx.stroke();
+
+    ctx.fillStyle = '#f8fafc';
+    ctx.font = 'bold 8px monospace';
+    ctx.fillText(label, cx, cy + 18);
+  };
+
+  drawGauge(74, 90, '9 BAR');
+  drawGauge(182, 90, '15 BAR');
+
+  // Digital green temperature display
+  ctx.fillStyle = '#022c22';
+  ctx.fillRect(80, 138, 96, 24);
+  ctx.strokeStyle = '#059669';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(80, 138, 96, 24);
+  ctx.fillStyle = '#34d399';
+  ctx.font = 'bold 12px monospace';
+  ctx.fillText('93.5°C OPT', 128, 154);
+
+  // 3 Chrome Buttons
+  for (let i = 0; i < 3; i++) {
+    const bx = 65 + i * 63;
+    ctx.fillStyle = '#475569';
+    ctx.beginPath();
+    ctx.arc(bx, 190, 15, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#94a3b8';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.fillStyle = '#38bdf8';
+    ctx.beginPath();
+    ctx.arc(bx, 190, 4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Drip tray slots
+  ctx.fillStyle = '#334155';
+  for (let y = 222; y < 248; y += 7) {
+    ctx.fillRect(35, y, 186, 3);
+  }
+
+  ctx.textAlign = 'start';
+  const texture = new THREE.CanvasTexture(canvas);
+  texCache.set(key, texture);
+  return texture;
+}
+
+/**
+ * Procedural Smart Refrigerator Front Panel Texture
+ */
+function getFridgeTexture(): THREE.CanvasTexture {
+  const key = 'fridge_front_tex';
+  if (texCache.has(key)) return texCache.get(key)!;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 512;
+  const ctx = canvas.getContext('2d')!;
+
+  // Stainless steel background
+  const grad = ctx.createLinearGradient(0, 0, 256, 0);
+  grad.addColorStop(0, '#cbd5e1');
+  grad.addColorStop(0.5, '#f1f5f9');
+  grad.addColorStop(1, '#94a3b8');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 256, 512);
+
+  // Center vertical French door seam
+  ctx.fillStyle = '#475569';
+  ctx.fillRect(126, 0, 4, 340);
+
+  // Horizontal bottom freezer seam
+  ctx.fillRect(0, 340, 256, 5);
+
+  // Smart LCD Screen on Right Door
+  ctx.fillStyle = '#090d16';
+  ctx.fillRect(144, 45, 96, 180);
+  ctx.strokeStyle = '#38bdf8';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(144, 45, 96, 180);
+
+  // Smart hub UI
+  ctx.fillStyle = '#38bdf8';
+  ctx.font = 'bold 9px sans-serif';
+  ctx.fillText('METRO SMART HUB', 148, 64);
+
+  ctx.fillStyle = '#f8fafc';
+  ctx.font = 'bold 16px monospace';
+  ctx.fillText('37°F', 148, 92);
+  ctx.font = '9px sans-serif';
+  ctx.fillStyle = '#94a3b8';
+  ctx.fillText('FREEZER: 0°F', 148, 112);
+
+  ctx.fillStyle = '#34d399';
+  ctx.fillRect(148, 126, 88, 18);
+  ctx.fillStyle = '#022c22';
+  ctx.font = 'bold 9px sans-serif';
+  ctx.fillText('☕ COFFEE READY', 152, 138);
+
+  ctx.fillStyle = '#facc15';
+  ctx.font = '9px sans-serif';
+  ctx.fillText('🥛 MILK: STOCKED', 148, 168);
+  ctx.fillText('🥩 STEAKS: FRESH', 148, 186);
+  ctx.fillText('⚡ ENERGY: A+++', 148, 204);
+
+  // Water / Ice Dispenser Alcove on Left Door
+  ctx.fillStyle = '#1e293b';
+  ctx.fillRect(20, 110, 88, 130);
+  ctx.strokeStyle = '#64748b';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(20, 110, 88, 130);
+
+  ctx.fillStyle = '#38bdf8';
+  ctx.beginPath();
+  ctx.arc(64, 135, 6, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = '#94a3b8';
+  ctx.font = 'bold 8px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('ICE & WATER', 64, 160);
+  ctx.textAlign = 'start';
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texCache.set(key, texture);
+  return texture;
+}
+
+/**
+ * Procedural IDE Screen Texture for Laptop & Gaming Desk
+ */
+function getLaptopTexture(): THREE.CanvasTexture {
+  const key = 'laptop_ide_tex';
+  if (texCache.has(key)) return texCache.get(key)!;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 320;
+  const ctx = canvas.getContext('2d')!;
+
+  // IDE Dark theme
+  ctx.fillStyle = '#0f172a';
+  ctx.fillRect(0, 0, 512, 320);
+
+  // Window title bar & tabs
+  ctx.fillStyle = '#1e293b';
+  ctx.fillRect(0, 0, 512, 28);
+  ctx.fillStyle = '#0284c7';
+  ctx.fillRect(8, 6, 120, 22);
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 11px monospace';
+  ctx.fillText('housesim.ts', 20, 21);
+
+  // Code lines with colorful syntax tokens
+  const codeLines = [
+    { num: '1', tokens: [{ t: 'import', c: '#f43f5e' }, { t: ' { ThreeEngine } ', c: '#e2e8f0' }, { t: 'from', c: '#f43f5e' }, { t: ' "three";', c: '#38bdf8' }] },
+    { num: '2', tokens: [{ t: 'export const', c: '#a855f7' }, { t: ' houseWorld = ', c: '#e2e8f0' }, { t: 'new Engine();', c: '#34d399' }] },
+    { num: '3', tokens: [{ t: '// Brew aromatic morning coffee', c: '#64748b' }] },
+    { num: '4', tokens: [{ t: 'function', c: '#38bdf8' }, { t: ' brewEspresso(beans, filters) {', c: '#facc15' }] },
+    { num: '5', tokens: [{ t: '  player.giveBonusCash(+$15);', c: '#34d399' }] },
+    { num: '6', tokens: [{ t: '  player.speedBoost = 1.35;', c: '#fb923c' }] },
+    { num: '7', tokens: [{ t: '  soundFX.playCoffeeBrew();', c: '#38bdf8' }] },
+    { num: '8', tokens: [{ t: '}', c: '#facc15' }] },
+    { num: '9', tokens: [{ t: 'camera.rotateWithKeys("IJKL");', c: '#e2e8f0' }] },
+    { num: '10', tokens: [{ t: 'pets.spawnInLivingRoom();', c: '#34d399' }] },
+  ];
+
+  ctx.font = '12px monospace';
+  codeLines.forEach((line, idx) => {
+    const y = 54 + idx * 24;
+    ctx.fillStyle = '#475569';
+    ctx.fillText(line.num, 12, y);
+
+    let curX = 42;
+    line.tokens.forEach((tok) => {
+      ctx.fillStyle = tok.c;
+      ctx.fillText(tok.t, curX, y);
+      curX += ctx.measureText(tok.t).width;
+    });
+  });
+
+  // Mini-map on right side
+  ctx.fillStyle = 'rgba(30, 41, 59, 0.6)';
+  ctx.fillRect(450, 28, 62, 292);
+  for (let i = 0; i < 20; i++) {
+    ctx.fillStyle = (i % 3 === 0) ? '#38bdf8' : '#64748b';
+    ctx.fillRect(456, 38 + i * 12, Math.random() * 45 + 10, 4);
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texCache.set(key, texture);
+  return texture;
+}
+
+/**
+ * Procedural Contemporary Art Canvas Texture for Wall Art
+ */
+function getPaintingTexture(): THREE.CanvasTexture {
+  const key = 'art_canvas_painting_tex';
+  if (texCache.has(key)) return texCache.get(key)!;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 320;
+  const ctx = canvas.getContext('2d')!;
+
+  // Warm cream background
+  ctx.fillStyle = '#fef3c7';
+  ctx.fillRect(0, 0, 512, 320);
+
+  // Modern abstract arch and sun shapes
+  ctx.fillStyle = '#ea580c';
+  ctx.beginPath();
+  ctx.arc(180, 160, 95, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = '#0284c7';
+  ctx.beginPath();
+  ctx.ellipse(320, 200, 110, 75, -0.2, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = '#f59e0b';
+  ctx.beginPath();
+  ctx.arc(360, 110, 55, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = '#1e1b4b';
+  ctx.fillRect(100, 240, 312, 35);
+
+  // Painter signature
+  ctx.fillStyle = '#78350f';
+  ctx.font = 'italic 14px serif';
+  ctx.fillText('Golden Horizon · Atelier Metro', 280, 305);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texCache.set(key, texture);
+  return texture;
 }
 
 /**
@@ -28,6 +600,7 @@ export function buildItem3DModel(item: CatalogItem, isActive: boolean = false): 
   const secMat = getStandardMat(item.secondaryColor || '#cbd5e1', 0.5, 0.2);
   const darkMat = getStandardMat('#1e293b', 0.6, 0.2);
   const brassMat = getStandardMat('#d97706', 0.25, 0.8);
+  const chromeMat = getStandardMat('#e2e8f0', 0.15, 0.9);
 
   const { width: w, height: h, depth: d } = item.dimensions;
 
@@ -40,10 +613,10 @@ export function buildItem3DModel(item: CatalogItem, isActive: boolean = false): 
       frame.castShadow = true;
       group.add(frame);
 
-      const canvasGeo = new THREE.PlaneGeometry(w * 0.9, h * 0.88);
+      const canvasGeo = new THREE.PlaneGeometry(w * 0.92, h * 0.88);
       const canvasMat = new THREE.MeshStandardMaterial({
-        color: new THREE.Color(item.color),
-        roughness: 0.8,
+        map: getPaintingTexture(),
+        roughness: 0.7,
       });
       const canvas = new THREE.Mesh(canvasGeo, canvasMat);
       canvas.position.z = d * 0.5 + 0.005;
@@ -77,30 +650,69 @@ export function buildItem3DModel(item: CatalogItem, isActive: boolean = false): 
     }
 
     case 'wall_tv': {
-      // 75" Flat TV flush mounted to wall
-      const tvBody = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), darkMat);
+      // High-End 75" Neo-QLED Ultra-Slim Smart TV
+      // 1. Sleek Black Metallic Bezel Frame
+      const bezelMat = getStandardMat('#0a0d14', 0.25, 0.85);
+      const tvBody = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), bezelMat);
       group.add(tvBody);
 
-      const screenMat = new THREE.MeshBasicMaterial({
-        color: isActive ? 0x38bdf8 : 0x090d16,
+      // 2. High-Resolution Dynamic 4K TV Screen with Broadcast Graphics
+      const tvTex = getTVTexture(isActive);
+      const screenMat = new THREE.MeshStandardMaterial({
+        map: tvTex,
+        roughness: 0.15,
+        metalness: 0.05,
+        emissive: isActive ? new THREE.Color(0xffffff) : new THREE.Color(0x000000),
+        emissiveMap: isActive ? tvTex : null,
+        emissiveIntensity: isActive ? 0.75 : 0,
       });
-      const screen = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.95, h * 0.92), screenMat);
+      const screen = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.97, h * 0.93), screenMat);
       screen.position.z = d * 0.5 + 0.005;
       group.add(screen);
 
+      // 3. Integrated Ultra-Slim Soundbar underneath TV
+      const soundbar = new THREE.Mesh(
+        new THREE.BoxGeometry(w * 0.9, 0.08, d * 1.4),
+        getStandardMat('#1e293b', 0.5, 0.3)
+      );
+      soundbar.position.set(0, -h * 0.5 - 0.05, d * 0.2);
+      group.add(soundbar);
+
+      // 4. Power Status LED indicator (Emerald Green when ON, Red when Standby)
+      const ledMat = new THREE.MeshBasicMaterial({ color: isActive ? 0x10b981 : 0xef4444 });
+      const statusLed = new THREE.Mesh(new THREE.SphereGeometry(0.015, 8, 8), ledMat);
+      statusLed.position.set(w * 0.44, -h * 0.47, d * 0.5 + 0.01);
+      group.add(statusLed);
+
+      // 5. Solid Wall-Mount Bracket behind TV
+      const bracket = new THREE.Mesh(
+        new THREE.BoxGeometry(w * 0.5, h * 0.5, 0.04),
+        getStandardMat('#334155', 0.6, 0.4)
+      );
+      bracket.position.z = -d * 0.5 - 0.02;
+      group.add(bracket);
+
       if (isActive) {
-        const tvGlow = new THREE.PointLight(0x38bdf8, 1.4, 5.0);
-        tvGlow.position.set(0, 0, 0.4);
+        const tvGlow = new THREE.PointLight(0x38bdf8, 1.8, 6.0);
+        tvGlow.position.set(0, 0, 0.5);
         group.add(tvGlow);
       }
       break;
     }
 
     case 'wall_clock': {
-      // Round wooden clock
+      // Round wooden clock with brass hands and ticking marks
       const clockBody = new THREE.Mesh(new THREE.CylinderGeometry(w * 0.5, w * 0.5, d, 24), secMat);
       clockBody.rotation.x = Math.PI / 2;
       group.add(clockBody);
+
+      const face = new THREE.Mesh(
+        new THREE.CylinderGeometry(w * 0.46, w * 0.46, 0.005, 24),
+        new THREE.MeshStandardMaterial({ color: 0xfefce8, roughness: 0.5 })
+      );
+      face.rotation.x = Math.PI / 2;
+      face.position.z = d * 0.5 + 0.002;
+      group.add(face);
 
       const hand1 = new THREE.Mesh(new THREE.BoxGeometry(0.02, w * 0.35, 0.01), darkMat);
       hand1.position.set(0, w * 0.15, d * 0.5 + 0.01);
@@ -111,8 +723,13 @@ export function buildItem3DModel(item: CatalogItem, isActive: boolean = false): 
     }
 
     case 'wall_shelf': {
-      // Floating wood shelf
-      const shelf = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mainMat);
+      // Floating wood shelf with wood texture
+      const woodMat = new THREE.MeshStandardMaterial({
+        color: new THREE.Color(item.color),
+        map: getWoodTexture('#78350f', '#451a03'),
+        roughness: 0.5,
+      });
+      const shelf = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), woodMat);
       shelf.castShadow = true;
       group.add(shelf);
       break;
@@ -134,52 +751,115 @@ export function buildItem3DModel(item: CatalogItem, isActive: boolean = false): 
 
     // --- HOME FURNITURE & APPLIANCES ---
     case 'sofa': {
-      const seat = new THREE.Mesh(new THREE.BoxGeometry(w, h * 0.45, d), mainMat);
+      // Textured Velvet / Fabric 3-Seater Sofa with Cushions and Wooden Legs
+      const fabricMat = new THREE.MeshStandardMaterial({
+        color: new THREE.Color(item.color),
+        map: getFabricTexture(item.color),
+        roughness: 0.75,
+      });
+      const woodLegMat = getStandardMat('#78350f', 0.5, 0.1);
+
+      // Seat base
+      const seat = new THREE.Mesh(new THREE.BoxGeometry(w, h * 0.45, d), fabricMat);
       seat.position.y = h * 0.25;
       seat.castShadow = true;
       group.add(seat);
 
-      const back = new THREE.Mesh(new THREE.BoxGeometry(w, h * 0.65, d * 0.25), mainMat);
+      // 3 Individual Plump Seat Cushions
+      const cushionW = (w * 0.88) / 3;
+      for (let i = 0; i < 3; i++) {
+        const cx = -w * 0.44 + cushionW * 0.5 + i * cushionW;
+        const cMesh = new THREE.Mesh(new THREE.BoxGeometry(cushionW * 0.94, h * 0.22, d * 0.8), fabricMat);
+        cMesh.position.set(cx, h * 0.46, d * 0.05);
+        cMesh.castShadow = true;
+        group.add(cMesh);
+      }
+
+      // Backrest
+      const back = new THREE.Mesh(new THREE.BoxGeometry(w, h * 0.65, d * 0.25), fabricMat);
       back.position.set(0, h * 0.65, -d * 0.38);
       back.castShadow = true;
       group.add(back);
 
-      const armL = new THREE.Mesh(new THREE.BoxGeometry(w * 0.12, h * 0.5, d), mainMat);
-      armL.position.set(-w * 0.45, h * 0.45, 0);
-      const armR = new THREE.Mesh(new THREE.BoxGeometry(w * 0.12, h * 0.5, d), mainMat);
-      armR.position.set(w * 0.45, h * 0.45, 0);
+      // Armrests
+      const armL = new THREE.Mesh(new THREE.BoxGeometry(w * 0.12, h * 0.52, d), fabricMat);
+      armL.position.set(-w * 0.45, h * 0.46, 0);
+      const armR = new THREE.Mesh(new THREE.BoxGeometry(w * 0.12, h * 0.52, d), fabricMat);
+      armR.position.set(w * 0.45, h * 0.46, 0);
       group.add(armL, armR);
+
+      // 4 Angled Scandinavian Wood Peg Legs
+      const legGeo = new THREE.CylinderGeometry(0.04, 0.025, 0.2, 8);
+      const legPositions = [
+        [-w * 0.42, 0.1, -d * 0.35],
+        [w * 0.42, 0.1, -d * 0.35],
+        [-w * 0.42, 0.1, d * 0.35],
+        [w * 0.42, 0.1, d * 0.35],
+      ];
+      legPositions.forEach(([lx, ly, lz]) => {
+        const leg = new THREE.Mesh(legGeo, woodLegMat);
+        leg.position.set(lx, ly, lz);
+        group.add(leg);
+      });
       break;
     }
 
     case 'bed': {
-      const base = new THREE.Mesh(new THREE.BoxGeometry(w, h * 0.35, d), darkMat);
+      // Solid Oak Bed Frame + Textured Mattress + Plump Pillows
+      const woodMat = new THREE.MeshStandardMaterial({
+        color: new THREE.Color('#475569'),
+        map: getWoodTexture('#334155', '#1e293b'),
+        roughness: 0.5,
+      });
+      const fabricMat = new THREE.MeshStandardMaterial({
+        color: new THREE.Color(item.secondaryColor || '#f8fafc'),
+        map: getFabricTexture('#f8fafc'),
+        roughness: 0.8,
+      });
+
+      const base = new THREE.Mesh(new THREE.BoxGeometry(w, h * 0.35, d), woodMat);
       base.position.y = h * 0.18;
       base.castShadow = true;
       group.add(base);
 
-      const mattress = new THREE.Mesh(new THREE.BoxGeometry(w * 0.94, h * 0.3, d * 0.92), secMat);
-      mattress.position.set(0, h * 0.45, d * 0.02);
+      const mattress = new THREE.Mesh(new THREE.BoxGeometry(w * 0.94, h * 0.32, d * 0.92), fabricMat);
+      mattress.position.set(0, h * 0.46, d * 0.02);
       mattress.castShadow = true;
       group.add(mattress);
 
-      const headboard = new THREE.Mesh(new THREE.BoxGeometry(w, h * 0.8, d * 0.12), darkMat);
-      headboard.position.set(0, h * 0.55, -d * 0.44);
+      // Headboard
+      const headboard = new THREE.Mesh(new THREE.BoxGeometry(w, h * 0.85, d * 0.12), woodMat);
+      headboard.position.set(0, h * 0.58, -d * 0.44);
       headboard.castShadow = true;
       group.add(headboard);
+
+      // Dual Pillows
+      const pillowMat = getStandardMat('#ffffff', 0.8, 0.02);
+      const pillowL = new THREE.Mesh(new THREE.BoxGeometry(w * 0.38, 0.12, d * 0.22), pillowMat);
+      pillowL.position.set(-w * 0.23, h * 0.64, -d * 0.3);
+      const pillowR = new THREE.Mesh(new THREE.BoxGeometry(w * 0.38, 0.12, d * 0.22), pillowMat);
+      pillowR.position.set(w * 0.23, h * 0.64, -d * 0.3);
+      group.add(pillowL, pillowR);
       break;
     }
 
     case 'dining_table':
     case 'coffee_table':
     case 'desk': {
-      const top = new THREE.Mesh(new THREE.BoxGeometry(w, 0.06, d), mainMat);
-      top.position.y = h - 0.03;
+      // Wood plank top with texture
+      const woodMat = new THREE.MeshStandardMaterial({
+        color: new THREE.Color(item.color),
+        map: getWoodTexture(item.color, '#271202'),
+        roughness: 0.45,
+      });
+
+      const top = new THREE.Mesh(new THREE.BoxGeometry(w, 0.07, d), woodMat);
+      top.position.y = h - 0.035;
       top.castShadow = true;
       group.add(top);
 
-      const legH = h - 0.06;
-      const legGeo = new THREE.BoxGeometry(0.06, legH, 0.06);
+      const legH = h - 0.07;
+      const legGeo = new THREE.BoxGeometry(0.07, legH, 0.07);
       const xOffsets = [-w * 0.45, w * 0.45];
       const zOffsets = [-d * 0.42, d * 0.42];
       for (const lx of xOffsets) {
@@ -215,28 +895,50 @@ export function buildItem3DModel(item: CatalogItem, isActive: boolean = false): 
     }
 
     case 'fridge': {
+      // French Door Smart Refrigerator with Stainless Steel Sheen & Smart Touch Screen
       const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mainMat);
       body.position.y = h * 0.5;
       body.castShadow = true;
       group.add(body);
 
-      const handle = new THREE.Mesh(new THREE.BoxGeometry(0.04, h * 0.4, 0.04), darkMat);
-      handle.position.set(w * 0.4, h * 0.5, d * 0.5 + 0.03);
-      group.add(handle);
+      // Front Face Panel with Smart Touchscreen Texture
+      const frontMat = new THREE.MeshStandardMaterial({
+        map: getFridgeTexture(),
+        roughness: 0.35,
+        metalness: 0.6,
+      });
+      const frontFace = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.98, h * 0.98), frontMat);
+      frontFace.position.set(0, h * 0.5, d * 0.5 + 0.005);
+      group.add(frontFace);
+
+      // Chrome Vertical Door Handles
+      const handleL = new THREE.Mesh(new THREE.BoxGeometry(0.035, h * 0.35, 0.04), chromeMat);
+      handleL.position.set(-0.06, h * 0.55, d * 0.5 + 0.03);
+      const handleR = new THREE.Mesh(new THREE.BoxGeometry(0.035, h * 0.35, 0.04), chromeMat);
+      handleR.position.set(0.06, h * 0.55, d * 0.5 + 0.03);
+      group.add(handleL, handleR);
       break;
     }
 
     case 'laptop': {
+      // UltraBook with Backlit IDE Display Screen
       const base = new THREE.Mesh(new THREE.BoxGeometry(w, 0.015, d * 0.7), darkMat);
       base.position.y = 0.008;
       group.add(base);
 
-      const screen = new THREE.Mesh(new THREE.BoxGeometry(w, d * 0.65, 0.012), darkMat);
-      screen.position.set(0, (d * 0.65) * 0.45, -d * 0.32);
-      screen.rotation.x = -0.25;
-      group.add(screen);
+      const screenLid = new THREE.Mesh(new THREE.BoxGeometry(w, d * 0.65, 0.012), darkMat);
+      screenLid.position.set(0, (d * 0.65) * 0.45, -d * 0.32);
+      screenLid.rotation.x = -0.25;
+      group.add(screenLid);
 
-      const disp = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.9, d * 0.55), new THREE.MeshBasicMaterial({ color: 0x38bdf8 }));
+      const dispMat = new THREE.MeshStandardMaterial({
+        map: getLaptopTexture(),
+        roughness: 0.2,
+        emissive: new THREE.Color(0xffffff),
+        emissiveMap: getLaptopTexture(),
+        emissiveIntensity: 0.7,
+      });
+      const disp = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.94, d * 0.58), dispMat);
       disp.position.set(0, (d * 0.65) * 0.45, -d * 0.32 + 0.01);
       disp.rotation.x = -0.25;
       group.add(disp);
@@ -244,14 +946,40 @@ export function buildItem3DModel(item: CatalogItem, isActive: boolean = false): 
     }
 
     case 'espresso': {
+      // Italian Espresso Machine with Pressure Gauges, Group Head, Portafilter, & Crema Cup
       const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mainMat);
       body.position.y = h * 0.5;
       body.castShadow = true;
       group.add(body);
 
-      const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.03, 0.07, 12), secMat);
-      cup.position.set(0, 0.1, d * 0.35);
-      group.add(cup);
+      // Front Face Panel with Pressure Dials & Buttons
+      const frontMat = new THREE.MeshStandardMaterial({
+        map: getEspressoTexture(),
+        roughness: 0.3,
+        metalness: 0.7,
+      });
+      const frontFace = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.95, h * 0.9), frontMat);
+      frontFace.position.set(0, h * 0.5, d * 0.5 + 0.005);
+      group.add(frontFace);
+
+      // Chrome Group Head & Portafilter with Handle
+      const groupHead = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.06, 16), chromeMat);
+      groupHead.position.set(0, h * 0.38, d * 0.5 + 0.05);
+      const portafilterHandle = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.14, 8), darkMat);
+      portafilterHandle.rotation.x = Math.PI / 2;
+      portafilterHandle.position.set(0, h * 0.38, d * 0.5 + 0.12);
+      group.add(groupHead, portafilterHandle);
+
+      // Espresso Cup with Golden Crema Coffee
+      const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.035, 0.07, 12), secMat);
+      cup.position.set(0, 0.06, d * 0.42);
+      const crema = new THREE.Mesh(
+        new THREE.CircleGeometry(0.04, 12),
+        new THREE.MeshStandardMaterial({ color: 0x92400e, roughness: 0.3 })
+      );
+      crema.rotation.x = -Math.PI / 2;
+      crema.position.set(0, 0.096, d * 0.42);
+      group.add(cup, crema);
       break;
     }
 
@@ -305,6 +1033,14 @@ export function buildItem3DModel(item: CatalogItem, isActive: boolean = false): 
       hood.position.set(0, h * 0.65, 0);
       hood.castShadow = true;
       group.add(hood);
+
+      const grillGrate = new THREE.Mesh(
+        new THREE.PlaneGeometry(w * 0.7, d * 0.7),
+        new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.7 })
+      );
+      grillGrate.rotation.x = -Math.PI / 2;
+      grillGrate.position.set(0, h * 0.52, 0);
+      group.add(grillGrate);
       break;
     }
 
@@ -547,18 +1283,47 @@ export function buildPet3DModel(pet: PetItem): THREE.Group {
     [-0.1, -bodyLength * 0.35],
     [0.1, -bodyLength * 0.35],
   ];
+  const legs: THREE.Mesh[] = [];
   legOffsets.forEach(([lx, lz]) => {
     const leg = new THREE.Mesh(legGeo, furMat);
     leg.position.set(lx, legHeight * 0.5, lz);
     leg.castShadow = true;
     group.add(leg);
+    legs.push(leg);
   });
 
-  // Tail
+  // Tail (Animateable)
   const tail = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.2), furMat);
   tail.position.set(0, torso.position.y + bodyHeight * 0.3, -bodyLength * 0.55);
   tail.rotation.x = -0.4;
   group.add(tail);
+
+  // Collar with Brass Tag (for Dogs & Cats)
+  if (pet.petType !== 'bunny_lop') {
+    const collar = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.14, 0.14, 0.04, 16),
+      getStandardMat('#dc2626', 0.4, 0.1)
+    );
+    collar.position.set(0, torso.position.y + bodyHeight * 0.3, bodyLength * 0.38);
+    collar.rotation.x = 0.25;
+    group.add(collar);
+
+    const tag = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.025, 0.025, 0.01, 8),
+      getStandardMat('#eab308', 0.2, 0.8)
+    );
+    tag.position.set(0, torso.position.y + bodyHeight * 0.15, bodyLength * 0.48);
+    tag.rotation.x = Math.PI / 2;
+    group.add(tag);
+  }
+
+  // Store references for animation in userData
+  group.userData = {
+    tail,
+    legs,
+    head,
+    petType: pet.petType,
+  };
 
   return group;
 }

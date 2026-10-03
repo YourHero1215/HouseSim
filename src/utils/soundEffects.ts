@@ -589,6 +589,25 @@ class SoundController {
       osc.stop(now + idx * 0.09 + 0.11);
     });
   }
+
+  playPetChirp() {
+    const ctx = this.getContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    [659.25, 880.0, 1046.5].forEach((freq, idx) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, now + idx * 0.07);
+      osc.frequency.exponentialRampToValueAtTime(freq * 1.15, now + idx * 0.07 + 0.09);
+      gain.gain.setValueAtTime(0.14, now + idx * 0.07);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.07 + 0.15);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now + idx * 0.07);
+      osc.stop(now + idx * 0.07 + 0.16);
+    });
+  }
 }
 
 export const soundFX = new SoundController();
