@@ -19,9 +19,10 @@ import {
   buildHelicopter3DModel,
   buildItem3DModel,
   buildPet3DModel,
+  getWoodTexture,
 } from '../utils/world3DBuilder';
 import { soundFX } from '../utils/soundEffects';
-import { CITY_NPCS, PETS_CATALOG } from '../data/catalog';
+import { CITY_NPCS, PETS_CATALOG, CATALOG_ITEMS } from '../data/catalog';
 
 interface VirtualHouseCanvasProps {
   playerCash: number;
@@ -323,18 +324,21 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
     }
 
     placedItems.forEach((placed) => {
-      const mockCatalogItem: CatalogItem = {
-        id: placed.itemId,
-        name: placed.name,
-        category: placed.category,
-        price: 0,
-        description: '',
-        placementType: placed.placementType,
-        dimensions: { width: 1, height: 1, depth: 1 },
-        color: '#d97706',
-        modelStyle: placed.itemId.replace(/^[a-z]+-([a-z]+)-?.*/, '$1') || 'box',
-      };
-      const model = buildItem3DModel(mockCatalogItem, placed.isActiveState);
+      const realItem = CATALOG_ITEMS.find((c) => c.id === placed.itemId);
+      const catalogItem: CatalogItem = realItem
+        ? { ...realItem, placementType: placed.placementType }
+        : {
+            id: placed.itemId,
+            name: placed.name,
+            category: placed.category,
+            price: 0,
+            description: '',
+            placementType: placed.placementType,
+            dimensions: { width: 1.5, height: 1, depth: 1 },
+            color: '#d97706',
+            modelStyle: placed.itemId.replace(/^[a-z]+-([a-z]+)-?.*/, '$1') || 'box',
+          };
+      const model = buildItem3DModel(catalogItem, placed.isActiveState);
       model.position.set(placed.position[0], placed.position[1], placed.position[2]);
       model.rotation.y = placed.rotationY;
       if (placed.isOnWall && placed.wallNormal) {
@@ -664,7 +668,12 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
       floorMeshesRef.current = [];
       backyardMeshesRef.current = [];
 
-      const floorMat = new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.5 });
+      const floorMat = new THREE.MeshStandardMaterial({
+        color: 0x78350f,
+        map: getWoodTexture('#92400e', '#3b1704'),
+        roughness: 0.45,
+        metalness: 0.05,
+      });
       const wallMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.7 });
       const lawnMat = new THREE.MeshStandardMaterial({ color: 0x15803d, roughness: 0.9 });
       const fenceMat = new THREE.MeshStandardMaterial({ color: 0x9a3412, roughness: 0.7 });
