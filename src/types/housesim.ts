@@ -5,7 +5,8 @@ export type ItemCategory =
   | 'outdoor'
   | 'car'
   | 'pet'
-  | 'everyday';
+  | 'everyday'
+  | 'grocery';
 
 export type PlacementType =
   | 'floor'
@@ -26,6 +27,29 @@ export interface CatalogItem {
   secondaryColor?: string;
   modelStyle: string;
   interactiveAction?: string;
+}
+
+export interface GroceryItem {
+  id: string;
+  name: string;
+  price: number;
+  icon: string;
+  category: 'beverage' | 'ingredient' | 'snack' | 'perishable';
+  description: string;
+  usageTip: string;
+}
+
+export type GroceryInventory = Record<string, number>;
+
+export interface CustomerOrder {
+  id: string;
+  customerName: string;
+  customerAvatar: string;
+  orderTitle: string;
+  itemsRequested: string[];
+  totalTip: number;
+  dialogue: string;
+  satisfaction: number;
 }
 
 export interface PlacedItem {
@@ -76,13 +100,39 @@ export interface PlacedPet {
   isFollowing: boolean;
 }
 
+export interface ShiftTask {
+  id: string;
+  title: string;
+  description: string;
+  customerName?: string;
+  customerGreeting?: string;
+  customerSpeech?: string;
+  requiredItem?: string;
+  targetLocation: string;
+  targetPos: [number, number, number];
+  rewardCash: number;
+  completed: boolean;
+}
+
+export interface ActiveShift {
+  jobId: string;
+  jobTitle: string;
+  workplaceName: string;
+  tasks: ShiftTask[];
+  currentTaskIdx: number;
+  tasksCompleted: number;
+  totalTasks: number;
+  timeRemainingSec: number;
+  totalEarnedShiftCash: number;
+}
+
 export interface JobInfo {
   id: string;
   title: string;
   workplaceName: string;
   basePay: number; // Dollars per shift ($)
   shiftDurationSec: number;
-  taskType: 'coffee' | 'courier' | 'coding' | 'architect';
+  taskType: 'clerk' | 'coffee' | 'courier' | 'coding' | 'architect' | 'mechanic';
   description: string;
 }
 

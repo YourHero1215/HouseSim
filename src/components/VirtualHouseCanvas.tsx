@@ -6,6 +6,8 @@ import {
   CarPhysics,
   CarVehicle,
   CatalogItem,
+  GroceryInventory,
+  GroceryItem,
   HelicopterPhysics,
   NPCData,
   PlacedItem,
@@ -56,6 +58,10 @@ interface VirtualHouseCanvasProps {
   onInteractWithPet: (pet: PlacedPet) => void;
   onOpenShop: (tab?: string) => void;
   onOpenWorkplace: () => void;
+  onOpenGroceryStore?: () => void;
+  groceryInventory?: GroceryInventory;
+  onBuyGrocery?: (item: GroceryItem, qty?: number) => void;
+  onUseGroceryItem?: (itemId: string) => void;
   onSpeedUpdate: (speedMph: number) => void;
   onBonusCash?: (amount: number, reason: string) => void;
   onShowToast?: (message: string) => void;
@@ -103,6 +109,10 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
   onInteractWithPet,
   onOpenShop,
   onOpenWorkplace,
+  onOpenGroceryStore,
+  groceryInventory = {},
+  onBuyGrocery,
+  onUseGroceryItem,
   onSpeedUpdate,
   initialPlayerPos,
   initialCarPos,
@@ -119,10 +129,13 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
   const [placementError, setPlacementError] = useState<string | null>(null);
   const [crashNotification, setCrashNotification] = useState<string | null>(null);
   const [nearbyPrompt, setNearbyPrompt] = useState<{ text: string; icon: string; actionId: string } | null>(null);
+  const [placingAngleDeg, setPlacingAngleDeg] = useState<number>(0);
+  const placingRotationRef = useRef<number>(0);
 
   const isExplodingRef = useRef<boolean>(false);
   const explosionTimerRef = useRef<number>(0);
   const cameraShakeRef = useRef<number>(0);
+  const espressoSpeedBoostTimerRef = useRef<number>(0);
 
   // Latest props reference for 60fps animation loop
   const stateRef = useRef({
@@ -148,6 +161,10 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
     onInteractWithPet,
     onOpenShop,
     onOpenWorkplace,
+    onOpenGroceryStore,
+    groceryInventory,
+    onBuyGrocery,
+    onUseGroceryItem,
     onSpeedUpdate,
     initialPlayerPos,
     initialCarPos,
@@ -186,6 +203,10 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
       onInteractWithPet,
       onOpenShop,
       onOpenWorkplace,
+      onOpenGroceryStore,
+      groceryInventory,
+      onBuyGrocery,
+      onUseGroceryItem,
       onSpeedUpdate,
       initialPlayerPos,
       initialCarPos,
@@ -813,7 +834,26 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
     // 6. Grand City Bank & Financial Center (x: 48, z: -20)
     createWalkableBuilding('Grand City Bank', 48, -20, 15, 13, '#1c1917', '#eab308', 'bank');
 
-    // 7. Metro Gas Station & Emergency Refuel Station (x: 28, z: 48)
+    // 7. Metro Fresh Supermarket & Groceries (x: 28, z: -38)
+    createWalkableBuilding('Metro Fresh Supermarket', 28, -38, 16, 13, '#064e3b', '#10b981', 'grocery');
+
+    // Supermarket Wooden Produce Shelves & Crates
+    const produceShelf1 = new THREE.Mesh(
+      new THREE.BoxGeometry(4.2, 1.1, 1.1),
+      new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.7 })
+    );
+    produceShelf1.position.set(24.5, 0.55, -39);
+    cityGroup.add(produceShelf1);
+
+    // Supermarket Refrigerator Display Unit (Milk, Drinks & Gelato)
+    const marketFridge = new THREE.Mesh(
+      new THREE.BoxGeometry(1.0, 2.3, 5.2),
+      new THREE.MeshStandardMaterial({ color: 0x0284c7, roughness: 0.2, metalness: 0.3 })
+    );
+    marketFridge.position.set(34.8, 1.15, -38);
+    cityGroup.add(marketFridge);
+
+    // 8. Metro Gas Station & Emergency Refuel Station (x: 28, z: 48)
     const gasCanopy = new THREE.Mesh(new THREE.BoxGeometry(18, 0.5, 14), new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.4 }));
     gasCanopy.position.set(28, 4.4, 48);
     cityGroup.add(gasCanopy);
@@ -1572,6 +1612,20 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
       const k = e.key.toLowerCase();
       keys.add(k);
 
+      // 'R' Key: Rotate Object during placement
+      if ((k === 'r' || k === 'R') && !e.repeat && stateRef.current.activePlacingItem) {
+        e.preventDefault();
+        placingRotationRef.current = (placingRotationRef.current + Math.PI / 2) % (Math.PI * 2);
+        const nextDeg = Math.round((placingRotationRef.current * 180) / Math.PI) % 360;
+        setPlacingAngleDeg(nextDeg);
+        if (ghostMeshRef.current) {
+          ghostMeshRef.current.rotation.y = placingRotationRef.current;
+        }
+        soundFX.playRotateObject();
+        stateRef.current.onShowToast?.(`🔄 Rotated ${stateRef.current.activePlacingItem.name} to ${nextDeg}°`);
+        return;
+      }
+
       // 'E' Key Interaction
       if (k === 'e' && !e.repeat) {
         const cur = stateRef.current;
@@ -1671,7 +1725,139 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
           return;
         }
 
-        // C. Boat boarding (Marina Slip)
+        // C. Check Interacting with Placed House Furniture
+        for (const placed of cur.placedItems) {
+          const itemPos = new THREE.Vector3(placed.position[0], placed.position[1], placed.position[2]);
+          const dist = humanPosRef.current.distanceTo(itemPos);
+          if (dist < 2.6) {
+            e.preventDefault();
+            const itemId = placed.itemId;
+
+            // 1. ESPRESSO MAKER (Requires Coffee Beans & Filters)
+            if (
+              itemId === 'item-espresso-maker' ||
+              placed.name.toLowerCase().includes('espresso') ||
+              placed.name.toLowerCase().includes('coffee')
+            ) {
+              const beans = cur.groceryInventory?.['grocery-coffee-beans'] || 0;
+              const filters = cur.groceryInventory?.['grocery-coffee-filters'] || 0;
+              if (beans > 0 && filters > 0) {
+                cur.onUseGroceryItem?.('grocery-coffee-filters');
+                soundFX.playCoffeeBrew();
+                espressoSpeedBoostTimerRef.current = 45.0; // 45s speed boost!
+                cur.onBonusCash?.(25, 'Espresso Artisan');
+                cur.onShowToast?.('☕ Fresh double espresso brewed! Movement speed boosted (+35%) & earned +$25 Coffee Artisan bonus!');
+              } else {
+                soundFX.playInteractChime();
+                cur.onShowToast?.('⚠️ Missing Espresso Beans & Filters! Visit Metro Fresh Supermarket down the road to buy ingredients.');
+              }
+              return;
+            }
+
+            // 2. SMART REFRIGERATOR (Grabs cold drinks/snacks)
+            if (
+              itemId === 'furn-fridge-smart' ||
+              placed.name.toLowerCase().includes('fridge') ||
+              placed.name.toLowerCase().includes('refrigerator')
+            ) {
+              const pantryItems = [
+                'grocery-milk',
+                'grocery-ice-cream',
+                'grocery-soda',
+                'grocery-apples',
+                'grocery-bread',
+                'grocery-popcorn',
+              ];
+              const available = pantryItems.find((id) => (cur.groceryInventory?.[id] || 0) > 0);
+              if (available) {
+                cur.onUseGroceryItem?.(available);
+                soundFX.playSnackEat();
+                cur.onBonusCash?.(15, 'Fridge Refreshment');
+                cur.onShowToast?.('🧊 Grabbed a cold snack from the smart fridge! Energy recharged (+100%) & earned +$15 bonus!');
+              } else {
+                soundFX.playInteractChime();
+                cur.onShowToast?.('🧊 Refrigerator is empty! Head to Metro Fresh Supermarket to stock up on delicious groceries.');
+              }
+              return;
+            }
+
+            // 3. BACKYARD BBQ GRILL (Requires Steaks / Burger Buns)
+            if (
+              itemId === 'outdoor-bbq-grill' ||
+              placed.name.toLowerCase().includes('grill') ||
+              placed.name.toLowerCase().includes('bbq')
+            ) {
+              const steaks = cur.groceryInventory?.['grocery-bbq-steak'] || 0;
+              const buns = cur.groceryInventory?.['grocery-bread'] || 0;
+              if (steaks > 0 || buns > 0) {
+                if (steaks > 0) cur.onUseGroceryItem?.('grocery-bbq-steak');
+                else cur.onUseGroceryItem?.('grocery-bread');
+                soundFX.playCookingSizzle();
+                cur.onBonusCash?.(40, 'Master Chef BBQ');
+                cur.onShowToast?.('🥩 Sizzling gourmet steaks & brioche burgers grilled to perfection! +$40 Master Chef reward!');
+              } else {
+                soundFX.playInteractChime();
+                cur.onShowToast?.('🥩 Need Prime Rib Steaks or Brioche Buns from Metro Fresh Supermarket to fire up the grill!');
+              }
+              return;
+            }
+
+            // 4. MOUNTED 4K OLED TV
+            if (itemId === 'wall-mounted-oled-tv' || placed.name.toLowerCase().includes('tv')) {
+              soundFX.playInteractChime();
+              cur.onBonusCash?.(10, 'TV Entertainment');
+              cur.onShowToast?.('📺 Switched to Championship Live Sports on 4K TV! Gained +$10 entertainment bonus!');
+              return;
+            }
+
+            // 5. WORKSTATION DESK & LAPTOP
+            if (
+              itemId === 'item-laptop-pro' ||
+              itemId === 'furn-gaming-desk' ||
+              placed.name.toLowerCase().includes('laptop') ||
+              placed.name.toLowerCase().includes('desk')
+            ) {
+              soundFX.playWorkTask();
+              cur.onBonusCash?.(35, 'Freelance Coding');
+              cur.onShowToast?.('💻 Finished freelance coding sprint on your workstation! Earned +$35 coding payout!');
+              return;
+            }
+
+            // 6. VELVET SOFA & PLATFORM BED
+            if (
+              itemId === 'furn-sofa-velvet' ||
+              itemId === 'furn-platform-bed' ||
+              placed.name.toLowerCase().includes('sofa') ||
+              placed.name.toLowerCase().includes('bed')
+            ) {
+              soundFX.playInteractChime();
+              cur.onShowToast?.('🛋️ Resting comfortably in your cozy home! Energy fully recharged.');
+              return;
+            }
+
+            // 7. BACKYARD POOL
+            if (itemId === 'outdoor-inground-pool' || placed.name.toLowerCase().includes('pool')) {
+              soundFX.playWaterSplash();
+              cur.onBonusCash?.(20, 'Pool Swim');
+              cur.onShowToast?.('🏊 Splashed into your private backyard swimming pool! Refreshing (+20 bonus)!');
+              return;
+            }
+
+            // 8. RUSTIC FIREPIT
+            if (itemId === 'outdoor-firepit' || placed.name.toLowerCase().includes('firepit')) {
+              soundFX.playPlaceObject();
+              cur.onShowToast?.('🔥 Roasted marshmallows over your stone firepit! Feeling cozy.');
+              return;
+            }
+
+            // Generic Placed Item interaction
+            soundFX.playInteractChime();
+            cur.onShowToast?.(`✨ Interacted with ${placed.name}!`);
+            return;
+          }
+        }
+
+        // D. Boat boarding (Marina Slip)
         const boatDist = humanPosRef.current.distanceTo(
           new THREE.Vector3(boatPhysicsRef.current.x, 0, boatPhysicsRef.current.z)
         );
@@ -1683,7 +1869,7 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
           return;
         }
 
-        // D. Helicopter boarding (Airport Helipad)
+        // E. Helicopter boarding (Airport Helipad)
         const heliDist = humanPosRef.current.distanceTo(
           new THREE.Vector3(helicopterPhysicsRef.current.x, 0, helicopterPhysicsRef.current.z)
         );
@@ -1694,7 +1880,7 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
           return;
         }
 
-        // E. Car boarding (Check fuel)
+        // F. Car boarding (Check fuel)
         if (carDist < 3.4) {
           e.preventDefault();
           if (cur.carFuel !== undefined && cur.carFuel <= 0) {
@@ -1707,7 +1893,7 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
           return;
         }
 
-        // D. Plaza Fountain (Coin Toss)
+        // G. Plaza Fountain (Coin Toss)
         const fountainDist = humanPosRef.current.distanceTo(new THREE.Vector3(48, 0, 48));
         if (fountainDist < 4.8) {
           e.preventDefault();
@@ -1733,7 +1919,7 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
           return;
         }
 
-        // E. Campfire
+        // H. Campfire
         const campDist = humanPosRef.current.distanceTo(new THREE.Vector3(-115, 0, -112));
         if (campDist < 4.0) {
           e.preventDefault();
@@ -1749,7 +1935,7 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
           return;
         }
 
-        // F. Mountain Lookout Telescope
+        // I. Mountain Lookout Telescope
         const teleDist = humanPosRef.current.distanceTo(new THREE.Vector3(-105, 0, -125));
         if (teleDist < 4.5) {
           e.preventDefault();
@@ -1768,7 +1954,7 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
           return;
         }
 
-        // G. Drive-In Cinema Speaker
+        // J. Drive-In Cinema Speaker
         const cinemaDist = humanPosRef.current.distanceTo(new THREE.Vector3(8.5, 0, 125));
         if (cinemaDist < 7.5) {
           e.preventDefault();
@@ -1788,7 +1974,7 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
           return;
         }
 
-        // H. Boardwalk Smoothie Stand
+        // K. Boardwalk Smoothie Stand
         const smoothieDist = humanPosRef.current.distanceTo(new THREE.Vector3(-110, 0, 92));
         if (smoothieDist < 4.2) {
           e.preventDefault();
@@ -1798,7 +1984,7 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
           return;
         }
 
-        // I. Beach Lounger
+        // L. Beach Lounger
         const loungerDist = humanPosRef.current.distanceTo(new THREE.Vector3(-102, 0, 108));
         if (loungerDist < 3.2) {
           e.preventDefault();
@@ -1807,7 +1993,7 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
           return;
         }
 
-        // J. NPC Interaction
+        // M. NPC Interaction
         for (const npc of npcMeshes) {
           const dist = humanPosRef.current.distanceTo(npc.group.position);
           if (dist < 3.2) {
@@ -1817,7 +2003,7 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
           }
         }
 
-        // K. Pet Interaction
+        // N. Pet Interaction
         for (const pet of cur.placedPets) {
           const petVec = new THREE.Vector3(pet.position[0], pet.position[1], pet.position[2]);
           if (humanPosRef.current.distanceTo(petVec) < 2.5) {
@@ -1827,13 +2013,16 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
           }
         }
 
-        // L. Shop Entrance
+        // O. City Commercial Shops & Supermarket
         for (const bldg of cityGroup.children) {
           if (bldg.userData?.isShop) {
             const dist = humanPosRef.current.distanceTo(bldg.position);
             if (dist < 8.0) {
               if (bldg.userData.shopType === 'workplace') {
                 cur.onOpenWorkplace();
+              } else if (bldg.userData.shopType === 'grocery') {
+                if (cur.onOpenGroceryStore) cur.onOpenGroceryStore();
+                else cur.onOpenShop('grocery');
               } else {
                 cur.onOpenShop(bldg.userData.shopType);
               }
@@ -1942,6 +2131,7 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
           const hit = hits[0];
           ghostGroup.visible = true;
           ghostGroup.position.set(hit.point.x, 0.05, hit.point.z);
+          ghostGroup.rotation.y = placingRotationRef.current;
           setPlacementError(null);
         }
       } else {
@@ -1957,6 +2147,7 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
           const hit = hits[0];
           ghostGroup.visible = true;
           ghostGroup.position.set(hit.point.x, 0.05, hit.point.z);
+          ghostGroup.rotation.y = placingRotationRef.current;
           setPlacementError(null);
         }
       }
@@ -2002,14 +2193,14 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
         const hits = raycaster.intersectObjects(targets, false);
         if (hits.length > 0) {
           const hit = hits[0];
-          stateRef.current.onPlaceItem(activeItem, [hit.point.x, 0.05, hit.point.z], 0, false);
+          stateRef.current.onPlaceItem(activeItem, [hit.point.x, 0.05, hit.point.z], placingRotationRef.current, false);
           soundFX.playPlaceObject();
           stateRef.current.onShowToast?.(`🛋️ Placed ${activeItem.name} in your home!`);
         } else {
           // Fallback to player's current position if raycast missed
           const px = humanPosRef.current.x;
           const pz = humanPosRef.current.z;
-          stateRef.current.onPlaceItem(activeItem, [px, 0.05, pz], 0, false);
+          stateRef.current.onPlaceItem(activeItem, [px, 0.05, pz], placingRotationRef.current, false);
           soundFX.playPlaceObject();
           stateRef.current.onShowToast?.(`🛋️ Placed ${activeItem.name} at your feet!`);
         }
@@ -2473,7 +2664,11 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
         if (keys.has('a') || keys.has('arrowleft')) inputRight -= 1;
 
         const isWalking = inputForward !== 0 || inputRight !== 0;
-        const walkSpeed = keys.has('shift') ? 6.5 : 4.2;
+        if (espressoSpeedBoostTimerRef.current > 0) {
+          espressoSpeedBoostTimerRef.current -= dt;
+        }
+        const baseWalkSpeed = keys.has('shift') ? 6.5 : 4.2;
+        const walkSpeed = espressoSpeedBoostTimerRef.current > 0 ? baseWalkSpeed * 1.35 : baseWalkSpeed;
 
         if (isWalking) {
           // Camera horizontal forward vector (from camera position towards player target)
@@ -2559,13 +2754,43 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
         const distToHeli = hPos.distanceTo(new THREE.Vector3(helicopterPhysicsRef.current.x, 0, helicopterPhysicsRef.current.z));
         const distToCar = hPos.distanceTo(new THREE.Vector3(carPhysicsRef.current.x, 0, carPhysicsRef.current.z));
         const distToGasStation = hPos.distanceTo(new THREE.Vector3(28, 0, 48));
+        const distToSupermarket = hPos.distanceTo(new THREE.Vector3(28, 0, -38));
         const distToFountain = hPos.distanceTo(new THREE.Vector3(48, 0, 48));
         const distToCamp = hPos.distanceTo(new THREE.Vector3(-115, 0, -112));
         const distToCinema = hPos.distanceTo(new THREE.Vector3(8.5, 0, 125));
         const distToSmoothie = hPos.distanceTo(new THREE.Vector3(-110, 0, 92));
         const distToTele = hPos.distanceTo(new THREE.Vector3(-105, 0, -125));
 
-        if (distToCar < 3.8 && cur.hasGasJug) {
+        // Check if near any placed furniture in house
+        let nearbyFurniturePrompt: { text: string; icon: string; actionId: string } | null = null;
+        for (const placed of cur.placedItems) {
+          const itemPos = new THREE.Vector3(placed.position[0], placed.position[1], placed.position[2]);
+          if (hPos.distanceTo(itemPos) < 2.5) {
+            const id = placed.itemId;
+            if (id === 'item-espresso-maker' || placed.name.toLowerCase().includes('espresso') || placed.name.toLowerCase().includes('coffee')) {
+              nearbyFurniturePrompt = { text: 'Press [E] to Brew Fresh Espresso (Requires Beans & Filters)', icon: '☕', actionId: 'espresso' };
+            } else if (id === 'furn-fridge-smart' || placed.name.toLowerCase().includes('fridge')) {
+              nearbyFurniturePrompt = { text: 'Press [E] to Open Refrigerator & Grab Chilled Snack', icon: '🧊', actionId: 'fridge' };
+            } else if (id === 'outdoor-bbq-grill' || placed.name.toLowerCase().includes('grill') || placed.name.toLowerCase().includes('bbq')) {
+              nearbyFurniturePrompt = { text: 'Press [E] to Sizzle Prime Steaks & Brioche Burgers', icon: '🥩', actionId: 'bbq' };
+            } else if (id === 'wall-mounted-oled-tv' || placed.name.toLowerCase().includes('tv')) {
+              nearbyFurniturePrompt = { text: 'Press [E] to Toggle 4K TV Channel (+$10)', icon: '📺', actionId: 'tv' };
+            } else if (id === 'item-laptop-pro' || id === 'furn-gaming-desk' || placed.name.toLowerCase().includes('laptop') || placed.name.toLowerCase().includes('desk')) {
+              nearbyFurniturePrompt = { text: 'Press [E] to Work Freelance Coding Sprint (+$35)', icon: '💻', actionId: 'laptop' };
+            } else if (id === 'furn-sofa-velvet' || id === 'furn-platform-bed' || placed.name.toLowerCase().includes('sofa') || placed.name.toLowerCase().includes('bed')) {
+              nearbyFurniturePrompt = { text: 'Press [E] to Sit & Rest (Recharge Energy)', icon: '🛋️', actionId: 'rest' };
+            } else if (id === 'outdoor-inground-pool' || placed.name.toLowerCase().includes('pool')) {
+              nearbyFurniturePrompt = { text: 'Press [E] to Dive into Swimming Pool', icon: '🏊', actionId: 'pool' };
+            } else if (id === 'outdoor-firepit' || placed.name.toLowerCase().includes('firepit')) {
+              nearbyFurniturePrompt = { text: 'Press [E] to Roast Marshmallows at Firepit', icon: '🔥', actionId: 'firepit' };
+            }
+            break;
+          }
+        }
+
+        if (nearbyFurniturePrompt) {
+          setNearbyPrompt(nearbyFurniturePrompt);
+        } else if (distToCar < 3.8 && cur.hasGasJug) {
           setNearbyPrompt({ text: 'Press [E] to Pour Gas Jug into Car Tank', icon: '⛽', actionId: 'refuel_jug' });
         } else if (distToCar < 3.4 && cur.carFuel !== undefined && cur.carFuel <= 0) {
           setNearbyPrompt({ text: '⚠️ Car is OUT OF GAS! Walk to Gas Station for Fuel Jug', icon: '🛢️', actionId: 'out_of_gas' });
@@ -2575,6 +2800,8 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
           } else {
             setNearbyPrompt({ text: 'Press [E] to Buy Emergency Fuel Jug ($20)', icon: '🛢️', actionId: 'buy_jug' });
           }
+        } else if (distToSupermarket < 7.5) {
+          setNearbyPrompt({ text: 'Press [E] to Shop Supermarket Groceries / Work Shift', icon: '🏪', actionId: 'supermarket' });
         } else if (distToBoat < 5.5) {
           setNearbyPrompt({ text: 'Press [E] to Board & Drive Yacht', icon: '⛵', actionId: 'boat' });
         } else if (distToHeli < 4.5) {
@@ -2746,15 +2973,31 @@ export const VirtualHouseCanvas: React.FC<VirtualHouseCanvasProps> = ({
 
       {/* Placing Item Guide Banner */}
       {activePlacingItem && (
-        <div className="pointer-events-auto absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-3 bg-amber-500 text-slate-950 px-4 py-2.5 rounded-2xl font-bold text-xs shadow-2xl border border-white/20">
+        <div className="pointer-events-auto absolute top-4 left-1/2 -translate-x-1/2 z-20 flex flex-wrap items-center justify-center gap-2.5 bg-amber-500 text-slate-950 px-4 py-2.5 rounded-2xl font-bold text-xs shadow-2xl border border-white/20">
           <span>
             Placing: <strong>{activePlacingItem.name}</strong> ({activePlacingItem.placementType === 'wall_only' ? 'Point on an Interior Wall' : 'Click Ground or Button'})
           </span>
           <button
             onClick={() => {
+              placingRotationRef.current = (placingRotationRef.current + Math.PI / 2) % (Math.PI * 2);
+              const nextDeg = Math.round((placingRotationRef.current * 180) / Math.PI) % 360;
+              setPlacingAngleDeg(nextDeg);
+              if (ghostMeshRef.current) {
+                ghostMeshRef.current.rotation.y = placingRotationRef.current;
+              }
+              soundFX.playRotateObject();
+            }}
+            className="px-2.5 py-1 rounded-xl bg-slate-950 hover:bg-slate-800 text-amber-300 text-xs font-black shadow-md transition-transform hover:scale-105 flex items-center gap-1"
+            title="Press [R] on keyboard or click to rotate 90°"
+          >
+            <span>🔄</span>
+            <span>Rotate [R] ({placingAngleDeg}°)</span>
+          </button>
+          <button
+            onClick={() => {
               const px = humanPosRef.current.x;
               const pz = humanPosRef.current.z;
-              onPlaceItem(activePlacingItem, [px, 0.05, pz], 0, false);
+              onPlaceItem(activePlacingItem, [px, 0.05, pz], placingRotationRef.current, false);
               soundFX.playPlaceObject();
               onShowToast?.(`🛋️ Placed ${activePlacingItem.name} at your feet!`);
             }}

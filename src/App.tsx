@@ -23,11 +23,14 @@ import {
   MapPin,
   Coins,
   Fuel,
+  Store,
 } from 'lucide-react';
 import {
   ActiveVehicleType,
   CarVehicle,
   CatalogItem,
+  GroceryInventory,
+  GroceryItem,
   HouseTierInfo,
   JobInfo,
   NPCData,
@@ -46,6 +49,7 @@ import { VirtualHouseCanvas } from './components/VirtualHouseCanvas';
 import { ShopModal } from './components/ShopModal';
 import { WorkplaceModal } from './components/WorkplaceModal';
 import { InventoryModal } from './components/InventoryModal';
+import { GroceryStoreModal } from './components/GroceryStoreModal';
 import { soundFX } from './utils/soundEffects';
 
 const STORAGE_KEY_SAVE = 'housesim_life_save_v2';
@@ -133,6 +137,53 @@ export default function App() {
     } catch {}
     return [];
   });
+
+  // Grocery Pantry & Kitchen Inventory
+  const [groceryInventory, setGroceryInventory] = useState<GroceryInventory>(() => {
+    try {
+      const saved = localStorage.getItem('housesim_grocery_pantry');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return {
+      'grocery-coffee-beans': 2,
+      'grocery-coffee-filters': 5,
+      'grocery-milk': 2,
+      'grocery-bbq-steak': 1,
+      'grocery-bread': 2,
+      'grocery-apples': 2,
+    };
+  });
+
+  const [groceryStoreModalOpen, setGroceryStoreModalOpen] = useState(false);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('housesim_grocery_pantry', JSON.stringify(groceryInventory));
+    } catch {}
+  }, [groceryInventory]);
+
+  const handleBuyGrocery = (item: GroceryItem, qty: number = 1) => {
+    setPlayerCash((prev) => Math.max(0, prev - item.price * qty));
+    setGroceryInventory((prev) => ({
+      ...prev,
+      [item.id]: (prev[item.id] || 0) + qty,
+    }));
+  };
+
+  const handleUseGroceryItem = (itemId: string) => {
+    setGroceryInventory((prev) => {
+      const cur = prev[itemId] || 0;
+      if (cur <= 1) {
+        const copy = { ...prev };
+        delete copy[itemId];
+        return copy;
+      }
+      return {
+        ...prev,
+        [itemId]: cur - 1,
+      };
+    });
+  };
 
   // Driving & Interaction States
   const [activeVehicle, setActiveVehicle] = useState<ActiveVehicleType>(null);
@@ -243,6 +294,7 @@ export default function App() {
         ownedItemIds,
         placedItems,
         placedPets,
+        groceryInventory,
         playerPos: latestPositionsRef.current.playerPos,
         carPos: latestPositionsRef.current.carPos,
         boatPos: latestPositionsRef.current.boatPos,
@@ -276,6 +328,7 @@ export default function App() {
     ownedItemIds,
     placedItems,
     placedPets,
+    groceryInventory,
     savedPositions,
     carFuel,
     hasGasJug,
@@ -496,6 +549,13 @@ export default function App() {
             Stores
           </button>
           <button
+            onClick={() => setGroceryStoreModalOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-emerald-700/80 border border-emerald-500/40 rounded-lg hover:bg-emerald-600 transition-colors whitespace-nowrap"
+          >
+            <Store className="w-3.5 h-3.5 text-emerald-300" />
+            Grocery
+          </button>
+          <button
             onClick={() => setWorkplaceModalOpen(true)}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-slate-800 border border-white/10 rounded-lg hover:bg-slate-700 transition-colors whitespace-nowrap"
           >
@@ -547,6 +607,10 @@ export default function App() {
           onInteractWithPet={handleInteractWithPet}
           onOpenShop={(_tab) => setShopModalOpen(true)}
           onOpenWorkplace={() => setWorkplaceModalOpen(true)}
+          onOpenGroceryStore={() => setGroceryStoreModalOpen(true)}
+          groceryInventory={groceryInventory}
+          onBuyGrocery={handleBuyGrocery}
+          onUseGroceryItem={handleUseGroceryItem}
           onSpeedUpdate={setVehicleSpeed}
           onAltitudeUpdate={setHelicopterAltitude}
           initialPlayerPos={savedPositions.playerPos}
@@ -578,6 +642,14 @@ export default function App() {
           >
             <span>🏡</span>
             <span>Home</span>
+          </button>
+          <button
+            onClick={() => handleQuickTravel([28, 0, -38], 'Metro Fresh Supermarket')}
+            className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-emerald-950/70 hover:bg-emerald-900 border border-emerald-500/40 text-emerald-200 text-xs font-semibold transition-all hover:scale-105"
+            title="Fast travel to Grocery Supermarket"
+          >
+            <span>🏪</span>
+            <span>Supermarket</span>
           </button>
           <button
             onClick={() => handleQuickTravel([28, 0, 48], 'Metro Gas Station')}
@@ -853,8 +925,19 @@ export default function App() {
         onClose={() => setInventoryModalOpen(false)}
         ownedItemIds={ownedItemIds}
         placedItems={placedItems}
+        groceryInventory={groceryInventory}
         onStartPlacing={(item) => setActivePlacingItem(item)}
         onRemovePlacedItem={handleRemovePlacedItem}
+        onOpenGroceryStore={() => setGroceryStoreModalOpen(true)}
+      />
+
+      <GroceryStoreModal
+        isOpen={groceryStoreModalOpen}
+        onClose={() => setGroceryStoreModalOpen(false)}
+        playerCash={playerCash}
+        groceryInventory={groceryInventory}
+        onBuyGrocery={handleBuyGrocery}
+        onOpenWorkplace={() => setWorkplaceModalOpen(true)}
       />
     </div>
   );
